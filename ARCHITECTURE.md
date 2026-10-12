@@ -218,9 +218,30 @@ To maintain architectural purity and prevent God Objects, GoldSrc.rs strictly en
 | **`Service`** | Self-contained domain capability provider. | Encapsulates specific domain logic behind a clean API. May maintain internal caches or worker threads. Pluggable implementations implement service traits. | `ConfigService` (TOML watching & reload events), `I18nService` (translation by player locale), `AuthService` (player capabilities). |
 | **`Dispatcher`** | Message/event router delivering payloads between producers and consumers. | Decouples senders from receivers. Routes 1-to-1 or 1-to-many. Does not hold persistent business state. | `EventDispatcher` (dispatches events to WASM plugins), `NetworkMessageDispatcher` (packs GoldSrc `TextMsg`/`SayText` network frames). |
 | **`Router`** | Input argument parser and direct endpoint dispatcher. | Parses incoming raw command lines, text tokens, or network inputs and routes to matching handlers. | `CliRouter` (`dispatch_host_command`), `CommandRouter` (chat `/cmd` and console dispatch). |
-| **`Bridge`** | Technical adapter across foreign runtime or ABI boundaries. | Connects two fundamentally different environments (e.g. C/C++ FFI, WIT component interfaces, or OS-level bindings). | `ReApiBridge` (ReHLDS/ReGameDLL FFI), `MetamodBridge`, `EngineBridge`. |
+| **`Adapter`** | Technical translation layer connecting an inward `Port` to an external `Provider`. | Subsumes legacy "Bridge". Connects two fundamentally different environments (C/C++ FFI, WIT component interfaces, or OS bindings) with panic and type barriers. | `MetamodAdapter`, `ReApiAdapter`, `StandaloneAdapter`, `StateFsStorageAdapter`. |
+| **`Port`** | Abstract, zero-cost SPI contract defined by the runtime or domain. | Pure trait interfaces with zero vendor types or foreign memory leaks. | `EnginePort` (`Engine`), `StorageProvider` (`StoragePort`), `AuthProvider` (`AuthPort`). |
+| **`Provider`** | The physical or external source of truth and engine state. | Never accessed directly by domain logic; only wrapped by Adapters. | GoldSrc C-ABI Engine (`swds.dll`), SQLite Database file, Wasmtime Store, Operating System FS. |
 
-### 6.1 Entity Identity & Handle Taxonomy
+### 6.1 The Canonical Hexagonal Triad: Port <-> Adapter <-> Provider
+
+GoldSrc.rs adopts the upstream `stitch-rs` **`Port <-> Adapter <-> Provider`** triad across all host and plugin boundaries:
+
+```text
+┌─────────────────────────────────┐      ┌───────────────────────────────────┐      ┌───────────────────────────────────┐
+│              Port               │ ◄──► │              Adapter              │ ◄──► │             Provider              │
+│      (Inward SPI Contract)      │      │      (Bridge & Translation)       │      │      (Physical Source of Truth)   │
+└─────────────────────────────────┘      └───────────────────────────────────┘      └───────────────────────────────────┘
+  goldsrc-spi::Engine                    goldsrc-backend-standalone / metamod       GoldSrc C-ABI (swds.dll / mp.dll)
+  goldsrc-spi::StorageProvider           goldsrc-core::SqliteStorageEngine          SQLite database file (WAL mode)
+  goldsrc-spi::AuthProvider              goldsrc-core::AuthManager                  External Auth DB / Steam Web API
+  statefs_config::ConfigStoragePort      goldsrc-core::StateFsConfigAdapter         statefs_core::MemStore
+```
+
+1. **`Port`**: Pure abstract Rust traits living in `goldsrc-spi` or core interfaces (`Engine`, `StorageProvider`, `ConfigStoragePort`).
+2. **`Adapter`**: Translation layer implementing the Port (e.g. `goldsrc-backend-metamod`, `goldsrc-extension-reapi`, SQLite workers). Bridges foreign memory, encapsulates `catch_unwind`, and normalizes errors into domain results.
+3. **`Provider`**: The physical engine, OS file, hardware interface, or external runtime holding truth (GoldSrc engine binary, SQLite file, Wasmtime guest context).
+
+### 6.2 Entity Identity & Handle Taxonomy
 
 To guarantee impenetrable engine thread-safety, zero-cost abstractions, and eliminate Slot Recycling Hazards (e.g. background tasks resolving recycled slots), GoldSrc.rs strictly categorizes entity and client identifiers:
 
