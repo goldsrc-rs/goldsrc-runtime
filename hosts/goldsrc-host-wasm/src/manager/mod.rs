@@ -499,18 +499,19 @@ impl PluginManager {
         self.command_registry.command_names()
     }
 
-    /// Dispatches a server command to the plugins that registered it.
+    /// Dispatches a server command to the plugins that registered it via SMA U-cycle pipeline.
     pub fn dispatch_command(&mut self, cmd: &str, caller: i32, args: &str) -> bool {
         if let Some(owners) = self.command_registry.get_handlers(cmd) {
-            for &idx in owners {
-                if let Some(plugin) = self.plugins.get_mut(idx) {
-                    if plugin.call_on_command(cmd, caller, args).unwrap_or(false) {
-                        return true;
-                    }
-                }
-            }
+            let mut ctx = crate::pipeline::CommandContext {
+                cmd,
+                caller,
+                args,
+                consumed: false,
+            };
+            crate::pipeline::execute_command_pipeline(&mut self.plugins, owners, &mut ctx)
+        } else {
+            false
         }
-        false
     }
 
     /// Ticks every plugin's `on_frame`.
@@ -581,15 +582,16 @@ impl PluginManager {
         }
     }
 
-    /// Calls `on_event` on every (non-paused) plugin.
+    /// Calls `on_event` on every (non-paused) plugin via SMA broadcast pipeline.
     pub fn call_on_event(&mut self, name: &str, data: &[u8]) {
-        let mut had_poison = false;
-        for plugin in &mut self.plugins {
-            if plugin.call_on_event(name, data).is_err() {
-                had_poison = true;
-            }
-        }
-        if had_poison {
+        let mut ctx = crate::pipeline::EventContext {
+            name,
+            data,
+            had_poison: false,
+            delivered_count: 0,
+        };
+        crate::pipeline::execute_event_pipeline(&mut self.plugins, &mut ctx);
+        if ctx.had_poison {
             self.recalculate_dependency_states();
         }
     }
