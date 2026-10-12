@@ -8,5 +8,6 @@ description = "Universal placeholder engine, registry, and string interpolator f
 [dependencies]
 goldsrc-api = { workspace = true }
 goldsrc-spi = { workspace = true }
+stitch-rs = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }

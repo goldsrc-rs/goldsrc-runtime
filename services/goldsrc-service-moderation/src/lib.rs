@@ -10,6 +10,178 @@ use goldsrc_spi::engine::Engine;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use stitch_rs::flow::FlowControl;
+
+/// Type of moderation action executed in the U-cycle pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModerationIntentKind {
+    Kick,
+    Mute { duration: Option<Duration> },
+    Unmute,
+    Ban { duration: Option<Duration> },
+    Unban,
+}
+
+/// The intent entering the moderation U-cycle pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModerationIntent<'a> {
+    pub kind: ModerationIntentKind,
+    pub target: &'a str,
+    pub reason: &'a str,
+    pub caller: i32,
+}
+
+/// 64-byte aligned execution context for moderation operations conforming to SMA.
+#[repr(C, align(64))]
+pub struct ModerationContext<'a> {
+    pub target_slot: Option<i32>,
+    pub target_name: &'a str,
+    pub target_identity: &'a str,
+    pub caller: i32,
+    pub is_suppressed: bool,
+    pub suppression_reason: Option<String>,
+}
+
+impl<'a> stitch_rs::Blackboard for ModerationContext<'a> {}
+
+impl<'a> ModerationContext<'a> {
+    pub fn new(
+        target_slot: Option<i32>,
+        target_name: &'a str,
+        target_identity: &'a str,
+        caller: i32,
+    ) -> Self {
+        Self {
+            target_slot,
+            target_name,
+            target_identity,
+            caller,
+            is_suppressed: false,
+            suppression_reason: None,
+        }
+    }
+
+    pub fn suppress(&mut self, reason: impl Into<String>) {
+        self.is_suppressed = true;
+        self.suppression_reason = Some(reason.into());
+    }
+}
+
+/// Middleware layer for intercepting, auditing, or rate-limiting moderation actions.
+pub trait ModerationLayer: Send + Sync {
+    /// Descent phase: inspection, permission checks, anti-abuse.
+    fn on_enter(
+        &self,
+        ctx: &mut ModerationContext<'_>,
+        intent: &ModerationIntent<'_>,
+    ) -> FlowControl<(), (), ()>;
+
+    /// Ascent phase: audit logging, external telemetry, webhooks.
+    fn on_exit(
+        &self,
+        ctx: &mut ModerationContext<'_>,
+        intent: &ModerationIntent<'_>,
+        outcome: &mut Result<(), ()>,
+    );
+}
+
+/// Terminal leaf node terminating U-cycle descent for moderation actions.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModerationTerminal;
+
+impl stitch_rs::middleware::Terminal<ModerationContext<'_>, ModerationIntent<'_>, (), ()>
+    for ModerationTerminal
+{
+    #[inline(always)]
+    fn execute(
+        &mut self,
+        ctx: &mut ModerationContext<'_>,
+        _intent: ModerationIntent<'_>,
+    ) -> Result<(), ()> {
+        if ctx.is_suppressed { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Dynamic SMA moderation pipeline orchestrator.
+#[derive(Default, Clone)]
+pub struct ModerationPipeline {
+    layers: Vec<Arc<dyn ModerationLayer>>,
+}
+
+impl ModerationPipeline {
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    pub fn with_layer(mut self, layer: Arc<dyn ModerationLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(
+        &self,
+        ctx: &mut ModerationContext<'_>,
+        intent: &ModerationIntent<'_>,
+    ) -> Result<(), ()> {
+        let mut halted = false;
+        let mut entered_count = 0;
+
+        for layer in &self.layers {
+            match layer.on_enter(ctx, intent) {
+                FlowControl::Proceed(()) => {
+                    entered_count += 1;
+                }
+                FlowControl::ShortCircuit(()) => {
+                    entered_count += 1;
+                    break;
+                }
+                FlowControl::Halt(()) => {
+                    halted = true;
+                    break;
+                }
+            }
+        }
+
+        let mut outcome = if halted || ctx.is_suppressed {
+            Err(())
+        } else {
+            Ok(())
+        };
+
+        for layer in self.layers.iter().take(entered_count).rev() {
+            layer.on_exit(ctx, intent, &mut outcome);
+        }
+
+        outcome
+    }
+}
+
+static MODERATION_PIPELINE: LazyLock<RwLock<ModerationPipeline>> =
+    LazyLock::new(|| RwLock::new(ModerationPipeline::new()));
+
+/// Registers a custom middleware layer with the global moderation pipeline.
+pub fn register_moderation_layer(layer: Arc<dyn ModerationLayer>) {
+    let mut lock = MODERATION_PIPELINE
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    *lock = lock.clone().with_layer(layer);
+}
+
+/// Dispatches a moderation action through the global SMA U-cycle pipeline.
+#[allow(clippy::result_unit_err)]
+pub fn dispatch_moderation(
+    ctx: &mut ModerationContext<'_>,
+    intent: &ModerationIntent<'_>,
+) -> Result<(), ()> {
+    let pipeline = {
+        let lock = MODERATION_PIPELINE
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        lock.clone()
+    };
+    pipeline.dispatch(ctx, intent)
+}
 
 /// Provider hook for engine callbacks (e.g. HostRuntime::engine).
 pub type EngineProvider = Arc<dyn Fn() -> Option<Arc<dyn Engine>> + Send + Sync>;
@@ -360,7 +532,24 @@ pub fn register_moderation_commands() {
                 "Kicked by moderator".to_string()
             };
 
-            if let Some((slot, name, _)) = resolve_player_target(target_str) {
+            if let Some((slot, name, auth)) = resolve_player_target(target_str) {
+                let mut ctx = ModerationContext::new(Some(slot), &name, &auth, caller);
+                let intent = ModerationIntent {
+                    kind: ModerationIntentKind::Kick,
+                    target: target_str,
+                    reason: &reason,
+                    caller,
+                };
+
+                if dispatch_moderation(&mut ctx, &intent).is_err() {
+                    let msg = ctx
+                        .suppression_reason
+                        .as_deref()
+                        .unwrap_or("Suppressed by policy");
+                    log::warn!("[Moderation] Kick blocked: {}", msg);
+                    return false;
+                }
+
                 drop_client(slot, &reason);
                 if caller == 0 {
                     println!(
@@ -409,7 +598,24 @@ pub fn register_moderation_commands() {
                 (Some(Duration::from_secs(300)), "Chat violation".to_string())
             };
 
-            if let Some((slot, name, _)) = resolve_player_target(target_str) {
+            if let Some((slot, name, auth)) = resolve_player_target(target_str) {
+                let mut ctx = ModerationContext::new(Some(slot), &name, &auth, caller);
+                let intent = ModerationIntent {
+                    kind: ModerationIntentKind::Mute { duration },
+                    target: target_str,
+                    reason: &reason,
+                    caller,
+                };
+
+                if dispatch_moderation(&mut ctx, &intent).is_err() {
+                    let msg = ctx
+                        .suppression_reason
+                        .as_deref()
+                        .unwrap_or("Suppressed by policy");
+                    log::warn!("[Moderation] Mute blocked: {}", msg);
+                    return false;
+                }
+
                 MUTE_REGISTRY
                     .write()
                     .unwrap_or_else(|e| e.into_inner())
@@ -527,6 +733,23 @@ pub fn register_moderation_commands() {
                         name.clone()
                     };
 
+                let mut ctx = ModerationContext::new(Some(slot), &name, &ban_target, caller);
+                let intent = ModerationIntent {
+                    kind: ModerationIntentKind::Ban { duration },
+                    target: target_str,
+                    reason: &reason,
+                    caller,
+                };
+
+                if dispatch_moderation(&mut ctx, &intent).is_err() {
+                    let msg = ctx
+                        .suppression_reason
+                        .as_deref()
+                        .unwrap_or("Suppressed by policy");
+                    log::warn!("[Moderation] Ban blocked: {}", msg);
+                    return false;
+                }
+
                 let entry = BAN_REGISTRY.write().unwrap_or_else(|e| e.into_inner()).ban(
                     &ban_target,
                     duration,
@@ -545,6 +768,23 @@ pub fn register_moderation_commands() {
                 true
             } else {
                 // Offline direct identity ban
+                let mut ctx = ModerationContext::new(None, target_str, target_str, caller);
+                let intent = ModerationIntent {
+                    kind: ModerationIntentKind::Ban { duration },
+                    target: target_str,
+                    reason: &reason,
+                    caller,
+                };
+
+                if dispatch_moderation(&mut ctx, &intent).is_err() {
+                    let msg = ctx
+                        .suppression_reason
+                        .as_deref()
+                        .unwrap_or("Suppressed by policy");
+                    log::warn!("[Moderation] Ban blocked: {}", msg);
+                    return false;
+                }
+
                 let entry = BAN_REGISTRY
                     .write()
                     .unwrap_or_else(|e| e.into_inner())
@@ -735,5 +975,55 @@ mod tests {
 
         assert!(reg.unmute(1));
         assert!(!reg.is_muted(1));
+    }
+
+    #[test]
+    fn test_moderation_context_alignment_and_blackboard() {
+        let ctx = ModerationContext::new(Some(1), "Player1", "STEAM_0:1:12345", 0);
+        assert_eq!(std::mem::align_of_val(&ctx), 64);
+        assert!(!ctx.is_suppressed);
+    }
+
+    struct MockAuditLayer {
+        called: std::sync::atomic::AtomicBool,
+    }
+
+    impl ModerationLayer for MockAuditLayer {
+        fn on_enter(
+            &self,
+            _ctx: &mut ModerationContext<'_>,
+            _intent: &ModerationIntent<'_>,
+        ) -> FlowControl<(), (), ()> {
+            self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+            FlowControl::Proceed(())
+        }
+
+        fn on_exit(
+            &self,
+            _ctx: &mut ModerationContext<'_>,
+            _intent: &ModerationIntent<'_>,
+            _outcome: &mut Result<(), ()>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn test_moderation_pipeline_u_cycle() {
+        let audit = Arc::new(MockAuditLayer {
+            called: std::sync::atomic::AtomicBool::new(false),
+        });
+
+        let pipeline = ModerationPipeline::new().with_layer(audit.clone());
+        let mut ctx = ModerationContext::new(Some(2), "Target", "STEAM_0:0:99", 0);
+        let intent = ModerationIntent {
+            kind: ModerationIntentKind::Kick,
+            target: "Target",
+            reason: "AFK",
+            caller: 0,
+        };
+
+        let res = pipeline.dispatch(&mut ctx, &intent);
+        assert_eq!(res, Ok(()));
+        assert!(audit.called.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

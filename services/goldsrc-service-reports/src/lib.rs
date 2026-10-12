@@ -21,7 +21,154 @@ pub use exporter::StorageExporter;
 pub use exporter::{JsonFileExporter, MemoryCollectorExporter, ReportExportError, ReportExporter};
 pub use model::{ReportEvent, ReportId, ReportKind, ReportPayload, ReportStatus, ReportSummary};
 
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, RwLock};
+use stitch_rs::flow::FlowControl;
+
+/// 64-byte aligned execution context for report event submissions and flushing under SMA.
+#[repr(C, align(64))]
+pub struct ReportSubmissionContext<'a> {
+    pub report_id: &'a str,
+    pub event_count: usize,
+    pub is_suppressed: bool,
+    pub suppression_reason: Option<String>,
+}
+
+impl<'a> stitch_rs::Blackboard for ReportSubmissionContext<'a> {}
+
+impl<'a> ReportSubmissionContext<'a> {
+    pub fn new(report_id: &'a str, event_count: usize) -> Self {
+        Self {
+            report_id,
+            event_count,
+            is_suppressed: false,
+            suppression_reason: None,
+        }
+    }
+
+    pub fn suppress(&mut self, reason: impl Into<String>) {
+        self.is_suppressed = true;
+        self.suppression_reason = Some(reason.into());
+    }
+}
+
+/// The intent entering report submission.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReportIntent<'a> {
+    RecordEvent { id: &'a str, event: &'a ReportEvent },
+    Flush { id: &'a str },
+}
+
+/// Middleware layer for intercepting, filtering, or auditing report submissions.
+pub trait ReportLayer: Send + Sync {
+    /// Descent phase: inspect payload, filter spam, rate limit.
+    fn on_enter(
+        &self,
+        ctx: &mut ReportSubmissionContext<'_>,
+        intent: &ReportIntent<'_>,
+    ) -> FlowControl<(), (), ()>;
+
+    /// Ascent phase: audit logging, external telemetry fan-out.
+    fn on_exit(
+        &self,
+        ctx: &mut ReportSubmissionContext<'_>,
+        intent: &ReportIntent<'_>,
+        outcome: &mut Result<(), ()>,
+    );
+}
+
+/// Terminal leaf node terminating report submission U-cycle descent.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReportTerminal;
+
+impl stitch_rs::middleware::Terminal<ReportSubmissionContext<'_>, ReportIntent<'_>, (), ()>
+    for ReportTerminal
+{
+    #[inline(always)]
+    fn execute(
+        &mut self,
+        ctx: &mut ReportSubmissionContext<'_>,
+        _intent: ReportIntent<'_>,
+    ) -> Result<(), ()> {
+        if ctx.is_suppressed { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Dynamic SMA report pipeline orchestrator.
+#[derive(Default, Clone)]
+pub struct ReportPipeline {
+    layers: Vec<Arc<dyn ReportLayer>>,
+}
+
+impl ReportPipeline {
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    pub fn with_layer(mut self, layer: Arc<dyn ReportLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(
+        &self,
+        ctx: &mut ReportSubmissionContext<'_>,
+        intent: &ReportIntent<'_>,
+    ) -> Result<(), ()> {
+        let mut entered_count = 0;
+        let mut halted = false;
+
+        for layer in &self.layers {
+            match layer.on_enter(ctx, intent) {
+                FlowControl::Proceed(()) => {
+                    entered_count += 1;
+                }
+                FlowControl::ShortCircuit(()) => {
+                    entered_count += 1;
+                    break;
+                }
+                FlowControl::Halt(()) => {
+                    halted = true;
+                    break;
+                }
+            }
+        }
+
+        let mut outcome = if halted || ctx.is_suppressed {
+            Err(())
+        } else {
+            Ok(())
+        };
+
+        for layer in self.layers.iter().take(entered_count).rev() {
+            layer.on_exit(ctx, intent, &mut outcome);
+        }
+
+        outcome
+    }
+}
+
+static REPORT_PIPELINE: LazyLock<RwLock<ReportPipeline>> =
+    LazyLock::new(|| RwLock::new(ReportPipeline::new()));
+
+/// Registers a custom middleware layer with the global report pipeline.
+pub fn register_report_layer(layer: Arc<dyn ReportLayer>) {
+    let mut lock = REPORT_PIPELINE.write().unwrap_or_else(|e| e.into_inner());
+    *lock = lock.clone().with_layer(layer);
+}
+
+/// Dispatches a report action through the global SMA U-cycle pipeline.
+#[allow(clippy::result_unit_err)]
+pub fn dispatch_report_pipeline(
+    ctx: &mut ReportSubmissionContext<'_>,
+    intent: &ReportIntent<'_>,
+) -> Result<(), ()> {
+    let pipeline = {
+        let lock = REPORT_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
+        lock.clone()
+    };
+    pipeline.dispatch(ctx, intent)
+}
 
 static GLOBAL_REPORTS: LazyLock<Arc<ReportAggregator>> =
     LazyLock::new(|| Arc::new(ReportAggregator::new()));
@@ -198,5 +345,59 @@ mod tests {
         assert_eq!(decoded.summary.total_kills, 42);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_report_submission_context_alignment() {
+        let ctx = ReportSubmissionContext::new("rep_01", 10);
+        assert_eq!(std::mem::align_of_val(&ctx), 64);
+        assert!(!ctx.is_suppressed);
+    }
+
+    struct MockReportFilterLayer;
+
+    impl ReportLayer for MockReportFilterLayer {
+        fn on_enter(
+            &self,
+            ctx: &mut ReportSubmissionContext<'_>,
+            intent: &ReportIntent<'_>,
+        ) -> FlowControl<(), (), ()> {
+            if let ReportIntent::RecordEvent { id, .. } = intent
+                && *id == "blocked_report"
+            {
+                ctx.suppress("Blacklisted report id");
+                return FlowControl::Halt(());
+            }
+            FlowControl::Proceed(())
+        }
+
+        fn on_exit(
+            &self,
+            _ctx: &mut ReportSubmissionContext<'_>,
+            _intent: &ReportIntent<'_>,
+            _outcome: &mut Result<(), ()>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn test_report_pipeline_u_cycle() {
+        let pipeline = ReportPipeline::new().with_layer(Arc::new(MockReportFilterLayer));
+
+        let mut ctx = ReportSubmissionContext::new("blocked_report", 1);
+        let dummy_event = ReportEvent::RoundOutcome {
+            round_num: 1,
+            winner_team: "CT".to_string(),
+            duration_secs: 105.0,
+            reason: "Target eliminated".to_string(),
+        };
+        let intent = ReportIntent::RecordEvent {
+            id: "blocked_report",
+            event: &dummy_event,
+        };
+
+        let res = pipeline.dispatch(&mut ctx, &intent);
+        assert_eq!(res, Err(()));
+        assert!(ctx.is_suppressed);
     }
 }

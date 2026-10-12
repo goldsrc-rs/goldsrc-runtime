@@ -687,6 +687,7 @@ dependencies = [
  "goldsrc-api",
  "goldsrc-spi",
  "log",
+ "stitch-rs",
  "thiserror",
 ]
 
@@ -700,6 +701,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "stitch-rs",
  "thiserror",
 ]
 
@@ -722,6 +724,7 @@ name = "goldsrc-service-telemetry"
 version = "0.20.0"
 dependencies = [
  "serde",
+ "stitch-rs",
  "sysinfo",
 ]
 
@@ -731,6 +734,7 @@ version = "0.20.0"
 dependencies = [
  "goldsrc-api",
  "log",
+ "stitch-rs",
 ]
 
 [[package]]
@@ -742,6 +746,7 @@ dependencies = [
  "log",
  "notify",
  "serde",
+ "stitch-rs",
  "thiserror",
 ]
 

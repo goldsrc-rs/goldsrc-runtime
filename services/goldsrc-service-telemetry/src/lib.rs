@@ -3,9 +3,110 @@
 //! Provides telemetry collection via `sysinfo` for CPU, process/system memory,
 //! and engine tickrate/jitter monitoring.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
+use stitch_rs::flow::FlowControl;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Pid, ProcessRefreshKind, RefreshKind, System};
+
+/// 64-byte aligned execution context for telemetry samples conforming to SMA.
+#[repr(C, align(64))]
+pub struct TelemetryContext<'a> {
+    pub metrics: &'a mut SystemMetricsSnapshot,
+    pub is_suppressed: bool,
+}
+
+impl<'a> stitch_rs::Blackboard for TelemetryContext<'a> {}
+
+impl<'a> TelemetryContext<'a> {
+    pub fn new(metrics: &'a mut SystemMetricsSnapshot) -> Self {
+        Self {
+            metrics,
+            is_suppressed: false,
+        }
+    }
+}
+
+/// Middleware layer for intercepting, enriching, or auditing telemetry samples.
+pub trait TelemetryLayer: Send + Sync {
+    /// Descent phase: inspect or annotate metrics snapshot.
+    fn on_enter(&self, ctx: &mut TelemetryContext<'_>) -> FlowControl<(), (), ()>;
+
+    /// Ascent phase: audit logging, external telemetry fan-out.
+    fn on_exit(&self, ctx: &mut TelemetryContext<'_>, outcome: &mut Result<(), ()>);
+}
+
+/// Terminal leaf node terminating telemetry U-cycle descent.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TelemetryTerminal;
+
+impl stitch_rs::middleware::Terminal<TelemetryContext<'_>, (), (), ()> for TelemetryTerminal {
+    #[inline(always)]
+    fn execute(&mut self, ctx: &mut TelemetryContext<'_>, _intent: ()) -> Result<(), ()> {
+        if ctx.is_suppressed { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Dynamic SMA telemetry pipeline orchestrator.
+#[derive(Default, Clone)]
+pub struct TelemetryPipeline {
+    layers: Vec<Arc<dyn TelemetryLayer>>,
+}
+
+impl TelemetryPipeline {
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    pub fn with_layer(mut self, layer: Arc<dyn TelemetryLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(&self, ctx: &mut TelemetryContext<'_>) -> Result<(), ()> {
+        let mut entered_count = 0;
+        let mut halted = false;
+
+        for layer in &self.layers {
+            match layer.on_enter(ctx) {
+                FlowControl::Proceed(()) => {
+                    entered_count += 1;
+                }
+                FlowControl::ShortCircuit(()) => {
+                    entered_count += 1;
+                    break;
+                }
+                FlowControl::Halt(()) => {
+                    halted = true;
+                    break;
+                }
+            }
+        }
+
+        let mut outcome = if halted || ctx.is_suppressed {
+            Err(())
+        } else {
+            Ok(())
+        };
+
+        for layer in self.layers.iter().take(entered_count).rev() {
+            layer.on_exit(ctx, &mut outcome);
+        }
+
+        outcome
+    }
+}
+
+static TELEMETRY_PIPELINE: std::sync::LazyLock<RwLock<TelemetryPipeline>> =
+    std::sync::LazyLock::new(|| RwLock::new(TelemetryPipeline::new()));
+
+/// Registers a custom middleware layer with the global telemetry pipeline.
+pub fn register_telemetry_layer(layer: Arc<dyn TelemetryLayer>) {
+    let mut lock = TELEMETRY_PIPELINE
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    *lock = lock.clone().with_layer(layer);
+}
 
 /// Snapshot of host hardware and process performance metrics.
 #[derive(Debug, Clone, PartialEq)]
@@ -197,7 +298,7 @@ impl SystemInfoService {
 
         let uptime_secs = self.start_time.elapsed().as_secs();
 
-        SystemMetricsSnapshot {
+        let mut snapshot = SystemMetricsSnapshot {
             cpu_brand,
             cpu_vendor,
             physical_cores,
@@ -213,7 +314,16 @@ impl SystemInfoService {
             measured_fps,
             frame_jitter_ms,
             uptime_secs,
-        }
+        };
+
+        let mut ctx = TelemetryContext::new(&mut snapshot);
+        let pipeline = {
+            let lock = TELEMETRY_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
+            lock.clone()
+        };
+        let _ = pipeline.dispatch(&mut ctx);
+
+        snapshot
     }
 }
 
@@ -260,5 +370,67 @@ mod tests {
             (0.0..1.0).contains(&jitter),
             "Expected low jitter, got {jitter}ms"
         );
+    }
+
+    #[test]
+    fn test_telemetry_context_alignment() {
+        let mut snapshot = SystemMetricsSnapshot {
+            cpu_brand: "CPU".to_string(),
+            cpu_vendor: "Vendor".to_string(),
+            physical_cores: Some(8),
+            logical_cores: 16,
+            global_cpu_usage: 10.0,
+            process_cpu_usage: 5.0,
+            process_memory_rss_bytes: 1024,
+            process_memory_virtual_bytes: 2048,
+            total_memory_bytes: 4096,
+            available_memory_bytes: 2048,
+            total_swap_bytes: 0,
+            used_swap_bytes: 0,
+            measured_fps: 100.0,
+            frame_jitter_ms: 0.1,
+            uptime_secs: 100,
+        };
+        let ctx = TelemetryContext::new(&mut snapshot);
+        assert_eq!(std::mem::align_of_val(&ctx), 64);
+        assert!(!ctx.is_suppressed);
+    }
+
+    struct MockTelemetryEnricher;
+
+    impl TelemetryLayer for MockTelemetryEnricher {
+        fn on_enter(&self, ctx: &mut TelemetryContext<'_>) -> FlowControl<(), (), ()> {
+            ctx.metrics.global_cpu_usage = 99.9;
+            FlowControl::Proceed(())
+        }
+
+        fn on_exit(&self, _ctx: &mut TelemetryContext<'_>, _outcome: &mut Result<(), ()>) {}
+    }
+
+    #[test]
+    fn test_telemetry_pipeline_u_cycle() {
+        let pipeline = TelemetryPipeline::new().with_layer(Arc::new(MockTelemetryEnricher));
+        let mut snapshot = SystemMetricsSnapshot {
+            cpu_brand: "CPU".to_string(),
+            cpu_vendor: "Vendor".to_string(),
+            physical_cores: Some(8),
+            logical_cores: 16,
+            global_cpu_usage: 10.0,
+            process_cpu_usage: 5.0,
+            process_memory_rss_bytes: 1024,
+            process_memory_virtual_bytes: 2048,
+            total_memory_bytes: 4096,
+            available_memory_bytes: 2048,
+            total_swap_bytes: 0,
+            used_swap_bytes: 0,
+            measured_fps: 100.0,
+            frame_jitter_ms: 0.1,
+            uptime_secs: 100,
+        };
+
+        let mut ctx = TelemetryContext::new(&mut snapshot);
+        let res = pipeline.dispatch(&mut ctx);
+        assert_eq!(res, Ok(()));
+        assert_eq!(snapshot.global_cpu_usage, 99.9);
     }
 }
