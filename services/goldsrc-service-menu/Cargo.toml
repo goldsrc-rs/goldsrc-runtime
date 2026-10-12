@@ -8,4 +8,5 @@ description = "Interactive player menu session manager and network renderer for 
 [dependencies]
 goldsrc-api = { workspace = true }
 goldsrc-spi = { workspace = true }
+stitch-rs = { workspace = true }
 log = { workspace = true }

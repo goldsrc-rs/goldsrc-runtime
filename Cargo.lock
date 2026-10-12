@@ -665,6 +665,7 @@ dependencies = [
  "goldsrc-api",
  "goldsrc-spi",
  "log",
+ "stitch-rs",
 ]
 
 [[package]]
