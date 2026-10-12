@@ -122,49 +122,26 @@ impl<T: ConfigModel + Serialize + DeserializeOwned + Default> ConfigBinder<T> {
 pub struct TomlSettingsAdapter;
 
 impl TomlSettingsAdapter {
-    /// Loads an abstract `SettingTree` from a TOML string.
+    /// Loads an abstract `SettingTree` from a TOML string via StateFS TOML ingestion.
     pub fn parse_str(content: &str) -> Result<goldsrc_api::setting::SettingTree, String> {
-        let value: toml::Value = toml::from_str(content)
-            .map_err(|e| format!("failed to parse TOML configuration: {e}"))?;
+        let mut store = statefs_core::MemStore::new();
+        statefs_codec_toml::ingest_toml(&mut store, content)
+            .map_err(|e| format!("failed to ingest TOML configuration into StateFS: {e}"))?;
 
         let mut tree = goldsrc_api::setting::SettingTree::new();
-        Self::flatten_toml("", &value, &mut tree);
-        Ok(tree)
-    }
-
-    /// Recursively flattens nested TOML tables into dot-separated keys.
-    fn flatten_toml(prefix: &str, val: &toml::Value, tree: &mut goldsrc_api::setting::SettingTree) {
-        match val {
-            toml::Value::Table(tbl) => {
-                for (k, v) in tbl {
-                    let next_prefix = if prefix.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{prefix}.{k}")
-                    };
-                    Self::flatten_toml(&next_prefix, v, tree);
-                }
-            }
-            toml::Value::String(s) => {
-                tree.insert(prefix.to_string(), s.clone());
-            }
-            toml::Value::Integer(i) => {
-                tree.insert(prefix.to_string(), i.to_string());
-            }
-            toml::Value::Float(f) => {
-                tree.insert(prefix.to_string(), f.to_string());
-            }
-            toml::Value::Boolean(b) => {
-                tree.insert(prefix.to_string(), b.to_string());
-            }
-            toml::Value::Datetime(dt) => {
-                tree.insert(prefix.to_string(), dt.to_string());
-            }
-            toml::Value::Array(_) => {
-                // Slices/arrays are serialized as JSON/TOML string representations
-                tree.insert(prefix.to_string(), val.to_string());
-            }
+        for (path, node) in store.find_glob("/**") {
+            let key = path.segments().join(".");
+            let val = match &node.value {
+                statefs_core::Value::String(s) => s.clone(),
+                statefs_core::Value::Int(i) => i.to_string(),
+                statefs_core::Value::Float(f) => f.to_string(),
+                statefs_core::Value::Bool(b) => b.to_string(),
+                statefs_core::Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
+                other => format!("{other:?}"),
+            };
+            tree.insert(key, val);
         }
+        Ok(tree)
     }
 
     /// Emits a documented TOML string from aggregate `Settings` schema and tree.
@@ -262,17 +239,24 @@ impl CvarSettingsAdapter {
         }
     }
 
-    /// Synchronizes engine CVar values into the aggregate `Settings`.
+    /// Synchronizes engine CVar values into the aggregate `Settings` via `CvarStorageAdapter`.
     pub fn sync_from_cvars<S: goldsrc_api::setting::Settings>(
         engine: &dyn goldsrc_api::cvar::CvarEngine,
         settings: &S,
     ) -> Result<(), goldsrc_api::setting::SettingError> {
         let schema = S::schema();
+        let mut adapter = crate::config::cvar::CvarStorageAdapter::new();
         let mut tree = goldsrc_api::setting::SettingTree::new();
 
         for meta in schema {
             let cvar_name = meta.key.replace('.', "_");
             if let Some(str_val) = engine.cvar_get_string(&cvar_name) {
+                let path = adapter.cvar_name_to_path(&cvar_name);
+                let _ = statefs_config::storage::port::ConfigStorageMut::insert(
+                    &mut adapter,
+                    &path,
+                    statefs_core::Value::from(str_val.as_str()),
+                );
                 tree.insert(meta.key.to_string(), str_val);
             }
         }
@@ -280,14 +264,22 @@ impl CvarSettingsAdapter {
         settings.load_from_tree(&tree)
     }
 
-    /// Synchronizes current aggregate `Settings` values into engine CVars.
+    /// Synchronizes current aggregate `Settings` values into engine CVars via `CvarStorageAdapter`.
     pub fn sync_to_cvars<S: goldsrc_api::setting::Settings>(
         engine: &dyn goldsrc_api::cvar::CvarEngine,
         settings: &S,
     ) {
         let tree = settings.export_tree();
+        let mut adapter = crate::config::cvar::CvarStorageAdapter::new();
+
         for (k, v) in tree {
             let cvar_name = k.replace('.', "_");
+            let path = adapter.cvar_name_to_path(&cvar_name);
+            let _ = statefs_config::storage::port::ConfigStorageMut::insert(
+                &mut adapter,
+                &path,
+                statefs_core::Value::from(v.as_str()),
+            );
             engine.cvar_set_string(&cvar_name, &v);
         }
     }

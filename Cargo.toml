@@ -89,6 +89,9 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 crossbeam-channel = "0.5"
 semver = "1.0"
 stitch-rs = { git = "https://github.com/ulquiorracode/stitch-rs.git", branch = "main" }
+statefs-core = { git = "https://github.com/ulquiorracode/statefs-rs.git", branch = "dev" }
+statefs-config = { git = "https://github.com/ulquiorracode/statefs-rs.git", branch = "dev" }
+statefs-codec-toml = { git = "https://github.com/ulquiorracode/statefs-rs.git", branch = "dev" }
 rustc-demangle = "0.1"
 
 [profile.dev]
