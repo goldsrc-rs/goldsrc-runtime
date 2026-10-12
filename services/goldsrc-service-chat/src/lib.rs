@@ -16,7 +16,35 @@ pub trait ChatLayer: Send + Sync {
     fn on_exit(&self, msg: &mut ChatMessage, outcome: &mut Result<(), ()>);
 }
 
-/// Global chat processing pipeline registry.
+/// Zero-cost adapter wrapping any [`ChatLayer`] to implement [`stitch_rs::middleware::Layer`].
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct ChatLayerAdapter<L>(pub L);
+
+impl<L: ChatLayer> stitch_rs::middleware::Layer<ChatMessage, (), (), ()> for ChatLayerAdapter<L> {
+    #[inline(always)]
+    fn on_enter(&self, ctx: &mut ChatMessage, _intent: ()) -> FlowControl<(), (), ()> {
+        self.0.on_enter(ctx)
+    }
+
+    #[inline(always)]
+    fn on_exit(&self, ctx: &mut ChatMessage, outcome: &mut Result<(), ()>) {
+        self.0.on_exit(ctx, outcome);
+    }
+}
+
+/// Terminal leaf node terminating U-cycle descent for chat messages.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChatTerminal;
+
+impl stitch_rs::middleware::Terminal<ChatMessage, (), (), ()> for ChatTerminal {
+    #[inline(always)]
+    fn execute(&mut self, ctx: &mut ChatMessage, _intent: ()) -> Result<(), ()> {
+        if ctx.is_blocked { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Global dynamic chat processing pipeline registry.
 static CHAT_PIPELINE: LazyLock<RwLock<Vec<Arc<dyn ChatLayer>>>> =
     LazyLock::new(|| RwLock::new(Vec::new()));
 
@@ -165,7 +193,7 @@ impl ChatTrigger for CommandChatTrigger {
     }
 }
 
-/// Traversal runner for SMA U-cycle middleware layers.
+/// Traversal runner for dynamic SMA U-cycle middleware layers.
 #[allow(clippy::result_unit_err)]
 pub fn run_chat_layers(layers: &[Arc<dyn ChatLayer>], msg: &mut ChatMessage) -> Result<(), ()> {
     let mut halted = false;
@@ -198,6 +226,32 @@ pub fn run_chat_layers(layers: &[Arc<dyn ChatLayer>], msg: &mut ChatMessage) -> 
     }
 
     outcome
+}
+
+/// Dynamic or monomorphic chat middleware pipeline orchestrator conforming to SMA.
+#[derive(Default, Clone)]
+pub struct ChatPipeline {
+    layers: Vec<Arc<dyn ChatLayer>>,
+}
+
+impl ChatPipeline {
+    /// Creates a new empty chat middleware pipeline.
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    /// Appends a chat middleware layer to the pipeline.
+    pub fn with_layer(mut self, layer: Arc<dyn ChatLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    /// Dispatches an incoming [`ChatMessage`] through the pipeline's U-cycle.
+    #[inline]
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(&self, msg: &mut ChatMessage) -> Result<(), ()> {
+        run_chat_layers(&self.layers, msg)
+    }
 }
 
 /// Dispatches local chat middleware pipeline inside a guest plugin or standalone test.
@@ -509,5 +563,21 @@ mod tests {
         let res_blocked = run_chat_layers(&layers, &mut msg_blocked);
         assert!(res_blocked.is_err());
         assert_eq!(msg_blocked.formatted_text, "[CENSORED]");
+
+        // Verify ChatPipeline builder dispatch
+        let pipeline = ChatPipeline::new()
+            .with_layer(Arc::new(AuditLayer))
+            .with_layer(Arc::new(CensorshipLayer));
+        let mut msg_pipeline =
+            ChatMessage::new(Player::new(1), "vip_hello server", ChatScope::all());
+        assert!(pipeline.dispatch(&mut msg_pipeline).is_ok());
+        assert_eq!(msg_pipeline.prefix.as_deref(), Some("[VIP]"));
+
+        // Verify ChatLayerAdapter with stitch_rs::Layer contract
+        use stitch_rs::middleware::Layer;
+        let adapter = ChatLayerAdapter(CensorshipLayer);
+        let mut msg_adapt = ChatMessage::new(Player::new(1), "badword test", ChatScope::all());
+        let flow = adapter.on_enter(&mut msg_adapt, ());
+        assert!(matches!(flow, FlowControl::Halt(())));
     }
 }
