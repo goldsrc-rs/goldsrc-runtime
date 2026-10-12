@@ -10,6 +10,143 @@ use goldsrc_api::menu::{
 };
 use goldsrc_spi::engine::Engine;
 
+use stitch_rs::flow::FlowControl;
+
+/// Execution context for a player menu slot selection in the SMA U-cycle.
+#[derive(Debug, Clone)]
+pub struct MenuSelectContext {
+    /// Slot index of the player performing selection.
+    pub player_idx: i32,
+    /// Selected numeric slot (1..=10).
+    pub slot: u8,
+    /// Timestamp of current engine frame.
+    pub current_time: f32,
+    /// Active slot action associated with this slot.
+    pub action: Option<SlotAction>,
+    /// Whether this selection should be suppressed/blocked.
+    pub is_suppressed: bool,
+}
+
+impl MenuSelectContext {
+    /// Creates a new `MenuSelectContext` from a player menu selection.
+    pub fn new(player_idx: i32, slot: u8, current_time: f32, action: Option<SlotAction>) -> Self {
+        Self {
+            player_idx,
+            slot,
+            current_time,
+            action,
+            is_suppressed: false,
+        }
+    }
+
+    /// Suppresses this menu selection from taking effect.
+    pub fn suppress(&mut self) {
+        self.is_suppressed = true;
+    }
+}
+
+/// Type definition for a menu filter middleware layer with SMA U-cycle semantics.
+pub trait MenuLayer: Send + Sync {
+    /// Descent phase: inspection, anti-flood/spam, authorization.
+    fn on_enter(&self, ctx: &mut MenuSelectContext) -> FlowControl<(), (), ()>;
+    /// Ascent phase: audit logging, telemetry, or notification.
+    fn on_exit(&self, ctx: &mut MenuSelectContext, outcome: &mut Result<(), ()>);
+}
+
+/// Zero-cost adapter wrapping any [`MenuLayer`] to implement [`stitch_rs::middleware::Layer`].
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct MenuLayerAdapter<L>(pub L);
+
+impl<L: MenuLayer> stitch_rs::middleware::Layer<MenuSelectContext, (), (), ()>
+    for MenuLayerAdapter<L>
+{
+    #[inline(always)]
+    fn on_enter(&self, ctx: &mut MenuSelectContext, _intent: ()) -> FlowControl<(), (), ()> {
+        self.0.on_enter(ctx)
+    }
+
+    #[inline(always)]
+    fn on_exit(&self, ctx: &mut MenuSelectContext, outcome: &mut Result<(), ()>) {
+        self.0.on_exit(ctx, outcome);
+    }
+}
+
+/// Terminal leaf node terminating U-cycle descent for menu selection.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MenuTerminal;
+
+impl stitch_rs::middleware::Terminal<MenuSelectContext, (), (), ()> for MenuTerminal {
+    #[inline(always)]
+    fn execute(&mut self, ctx: &mut MenuSelectContext, _intent: ()) -> Result<(), ()> {
+        if ctx.is_suppressed { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Traversal runner for dynamic SMA U-cycle menu middleware layers.
+#[allow(clippy::result_unit_err)]
+pub fn run_menu_layers(
+    layers: &[Arc<dyn MenuLayer>],
+    ctx: &mut MenuSelectContext,
+) -> Result<(), ()> {
+    let mut halted = false;
+    let mut entered_count = 0;
+
+    for layer in layers {
+        match layer.on_enter(ctx) {
+            FlowControl::Proceed(()) => {
+                entered_count += 1;
+            }
+            FlowControl::ShortCircuit(()) => {
+                entered_count += 1;
+                break;
+            }
+            FlowControl::Halt(()) => {
+                halted = true;
+                break;
+            }
+        }
+    }
+
+    let mut outcome = if halted || ctx.is_suppressed {
+        Err(())
+    } else {
+        Ok(())
+    };
+
+    for layer in layers.iter().take(entered_count).rev() {
+        layer.on_exit(ctx, &mut outcome);
+    }
+
+    outcome
+}
+
+/// Dynamic or monomorphic menu middleware pipeline orchestrator conforming to SMA.
+#[derive(Default, Clone)]
+pub struct MenuPipeline {
+    layers: Vec<Arc<dyn MenuLayer>>,
+}
+
+impl MenuPipeline {
+    /// Creates a new empty menu middleware pipeline.
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    /// Appends a menu middleware layer to the pipeline.
+    pub fn with_layer(mut self, layer: Arc<dyn MenuLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    /// Dispatches an incoming [`MenuSelectContext`] through the pipeline's U-cycle.
+    #[inline]
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(&self, ctx: &mut MenuSelectContext) -> Result<(), ()> {
+        run_menu_layers(&self.layers, ctx)
+    }
+}
+
 /// Callback hook invoked when an interactive menu action is executed.
 /// Arguments: `(player_idx, item_id, action_name)`.
 pub type MenuActionHandler = Arc<dyn Fn(i32, u32, &str) + Send + Sync>;
@@ -32,6 +169,7 @@ pub struct MenuSessionManager {
     debounce_tracker: HashMap<i32, f32>,
     cooldown_tracker: HashMap<(i32, u32), f32>,
     action_handler: Option<MenuActionHandler>,
+    pipeline: MenuPipeline,
     round_number: u32,
     round_start_time: f32,
 }
@@ -44,9 +182,21 @@ impl MenuSessionManager {
             debounce_tracker: HashMap::new(),
             cooldown_tracker: HashMap::new(),
             action_handler: None,
+            pipeline: MenuPipeline::new(),
             round_number: 1,
             round_start_time: 0.0,
         }
+    }
+
+    /// Attaches an SMA [`MenuPipeline`] to the session manager.
+    pub fn with_pipeline(mut self, pipeline: MenuPipeline) -> Self {
+        self.pipeline = pipeline;
+        self
+    }
+
+    /// Registers a middleware layer in the manager's menu pipeline.
+    pub fn add_layer(&mut self, layer: Arc<dyn MenuLayer>) {
+        self.pipeline.layers.push(layer);
     }
 
     /// Sets the action execution callback hook.
@@ -132,6 +282,15 @@ impl MenuSessionManager {
                 return false;
             }
         };
+
+        // 0. Execute SMA MenuPipeline U-cycle
+        let mut select_ctx =
+            MenuSelectContext::new(player_idx, slot, current_time, Some(action.clone()));
+        if self.pipeline.dispatch(&mut select_ctx).is_err() {
+            // Suppressed by middleware layer, re-insert session
+            self.sessions.insert(player_idx, session);
+            return false;
+        }
 
         // 1. Menu global debounce anti-flood check
         if let Some(debounce_dur) = session.menu.debounce {
@@ -974,5 +1133,41 @@ mod tests {
         // Frame tick at t=106.0 -> expired and removed
         mgr.tick_frame(106.0, &engine);
         assert!(!mgr.sessions.contains_key(&player));
+    }
+
+    struct RejectSlotOneLayer;
+    impl MenuLayer for RejectSlotOneLayer {
+        fn on_enter(&self, ctx: &mut MenuSelectContext) -> FlowControl<(), (), ()> {
+            if ctx.slot == 1 {
+                ctx.suppress();
+                FlowControl::Halt(())
+            } else {
+                FlowControl::Proceed(())
+            }
+        }
+
+        fn on_exit(&self, _ctx: &mut MenuSelectContext, _outcome: &mut Result<(), ()>) {}
+    }
+
+    #[test]
+    fn test_menu_pipeline_sma_u_cycle() {
+        let mut mgr = MenuSessionManager::new();
+        let engine = MockEngine;
+        let player = 45;
+
+        mgr.add_layer(Arc::new(RejectSlotOneLayer));
+
+        let menu = Menu::builder("Pipeline Menu")
+            .item(("Action 1", 101))
+            .item(("Action 2", 102))
+            .build();
+
+        mgr.open_menu(player, menu, &engine, 50.0);
+
+        // Slot 1 is blocked by RejectSlotOneLayer
+        assert!(!mgr.handle_menuselect(player, 1, &engine, 50.5));
+
+        // Slot 2 proceeds and succeeds
+        assert!(mgr.handle_menuselect(player, 2, &engine, 51.0));
     }
 }
