@@ -11,7 +11,155 @@ pub use goldsrc_api::timer::{
 };
 use std::collections::{BinaryHeap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
+use stitch_rs::flow::FlowControl;
+
+/// Trigger context intent representing an expiring timer or task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimerTriggerIntent {
+    pub id: TimerId,
+    pub is_recurring: bool,
+}
+
+/// 64-byte aligned execution context for timer trigger operations conforming to SMA.
+#[repr(C, align(64))]
+pub struct TimerTriggerContext {
+    pub id: TimerId,
+    pub tick: u64,
+    pub time: f64,
+    pub is_suppressed: bool,
+}
+
+impl stitch_rs::Blackboard for TimerTriggerContext {}
+
+impl TimerTriggerContext {
+    #[inline(always)]
+    pub fn new(id: TimerId, tick: u64, time: f64) -> Self {
+        Self {
+            id,
+            tick,
+            time,
+            is_suppressed: false,
+        }
+    }
+
+    #[inline(always)]
+    pub fn suppress(&mut self) {
+        self.is_suppressed = true;
+    }
+}
+
+/// Middleware layer for intercepting, auditing, or throttling timer triggers.
+pub trait TimerLayer: Send + Sync {
+    /// Descent phase: inspection, rate limiting, debugging.
+    fn on_enter(
+        &self,
+        ctx: &mut TimerTriggerContext,
+        intent: &TimerTriggerIntent,
+    ) -> FlowControl<(), (), ()>;
+
+    /// Ascent phase: telemetry, profiling, execution recording.
+    fn on_exit(
+        &self,
+        ctx: &mut TimerTriggerContext,
+        intent: &TimerTriggerIntent,
+        outcome: &mut Result<(), ()>,
+    );
+}
+
+/// Terminal leaf node terminating U-cycle descent for timer triggers.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TimerTerminal;
+
+impl stitch_rs::middleware::Terminal<TimerTriggerContext, TimerTriggerIntent, (), ()>
+    for TimerTerminal
+{
+    #[inline(always)]
+    fn execute(
+        &mut self,
+        ctx: &mut TimerTriggerContext,
+        _intent: TimerTriggerIntent,
+    ) -> Result<(), ()> {
+        if ctx.is_suppressed { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Dynamic SMA timer pipeline orchestrator.
+#[derive(Default, Clone)]
+pub struct TimerPipeline {
+    layers: Vec<Arc<dyn TimerLayer>>,
+}
+
+impl TimerPipeline {
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    pub fn with_layer(mut self, layer: Arc<dyn TimerLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(
+        &self,
+        ctx: &mut TimerTriggerContext,
+        intent: &TimerTriggerIntent,
+    ) -> Result<(), ()> {
+        let mut halted = false;
+        let mut entered_count = 0;
+
+        for layer in &self.layers {
+            match layer.on_enter(ctx, intent) {
+                FlowControl::Proceed(()) => {
+                    entered_count += 1;
+                }
+                FlowControl::ShortCircuit(()) => {
+                    entered_count += 1;
+                    break;
+                }
+                FlowControl::Halt(()) => {
+                    halted = true;
+                    break;
+                }
+            }
+        }
+
+        let mut outcome = if halted || ctx.is_suppressed {
+            Err(())
+        } else {
+            Ok(())
+        };
+
+        for layer in self.layers.iter().take(entered_count).rev() {
+            layer.on_exit(ctx, intent, &mut outcome);
+        }
+
+        outcome
+    }
+}
+
+static TIMER_PIPELINE: LazyLock<RwLock<TimerPipeline>> =
+    LazyLock::new(|| RwLock::new(TimerPipeline::new()));
+
+/// Registers a custom middleware layer with the global timer pipeline.
+pub fn register_timer_layer(layer: Arc<dyn TimerLayer>) {
+    let mut lock = TIMER_PIPELINE.write().unwrap_or_else(|e| e.into_inner());
+    *lock = lock.clone().with_layer(layer);
+}
+
+/// Dispatches a timer trigger through the global SMA U-cycle pipeline.
+#[allow(clippy::result_unit_err)]
+pub fn dispatch_timer_trigger(
+    ctx: &mut TimerTriggerContext,
+    intent: &TimerTriggerIntent,
+) -> Result<(), ()> {
+    let pipeline = TIMER_PIPELINE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    pipeline.dispatch(ctx, intent)
+}
 
 type TaskCallback = Box<dyn FnMut() -> TimerAction + Send + 'static>;
 
@@ -338,6 +486,22 @@ impl TimerService {
                 continue;
             }
 
+            let is_recurring = matches!(entry.mode, TimerMode::Recurring(_));
+            let intent = TimerTriggerIntent {
+                id: entry.id,
+                is_recurring,
+            };
+            let mut ctx = TimerTriggerContext::new(entry.id, current_tick, current_time);
+
+            if dispatch_timer_trigger(&mut ctx, &intent).is_err() {
+                log::debug!(
+                    target: log_targets::CORE,
+                    "Timer {:?} suppressed by SMA timer pipeline",
+                    entry.id
+                );
+                continue;
+            }
+
             executed_count += 1;
             let action =
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (entry.callback)()))
@@ -385,6 +549,22 @@ impl TimerService {
                     "Timer {:?} skipped due to expired session token {:?}",
                     entry.id,
                     token
+                );
+                continue;
+            }
+
+            let is_recurring = matches!(entry.mode, TimerMode::Recurring(_));
+            let intent = TimerTriggerIntent {
+                id: entry.id,
+                is_recurring,
+            };
+            let mut ctx = TimerTriggerContext::new(entry.id, current_tick, current_time);
+
+            if dispatch_timer_trigger(&mut ctx, &intent).is_err() {
+                log::debug!(
+                    target: log_targets::CORE,
+                    "Timer {:?} suppressed by SMA timer pipeline",
+                    entry.id
                 );
                 continue;
             }
@@ -607,5 +787,62 @@ mod tests {
 
         assert_eq!(service.tick(3, 0.0, |_| true), 1);
         assert!(second_fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_timer_context_alignment() {
+        assert_eq!(
+            std::mem::align_of::<TimerTriggerContext>(),
+            64,
+            "TimerTriggerContext must have 64-byte cache line alignment per Scrooge invariant"
+        );
+    }
+
+    struct MockAuditLayer {
+        entered: Arc<std::sync::atomic::AtomicUsize>,
+        exited: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl TimerLayer for MockAuditLayer {
+        fn on_enter(
+            &self,
+            _ctx: &mut TimerTriggerContext,
+            _intent: &TimerTriggerIntent,
+        ) -> FlowControl<(), (), ()> {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            FlowControl::Proceed(())
+        }
+
+        fn on_exit(
+            &self,
+            _ctx: &mut TimerTriggerContext,
+            _intent: &TimerTriggerIntent,
+            outcome: &mut Result<(), ()>,
+        ) {
+            self.exited.fetch_add(1, Ordering::SeqCst);
+            assert!(outcome.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_timer_pipeline_u_cycle() {
+        let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let exited = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let layer = Arc::new(MockAuditLayer {
+            entered: entered.clone(),
+            exited: exited.clone(),
+        });
+
+        let pipeline = TimerPipeline::new().with_layer(layer);
+        let mut ctx = TimerTriggerContext::new(TimerId(1), 10, 0.5);
+        let intent = TimerTriggerIntent {
+            id: TimerId(1),
+            is_recurring: false,
+        };
+
+        let res = pipeline.dispatch(&mut ctx, &intent);
+        assert!(res.is_ok());
+        assert_eq!(entered.load(Ordering::SeqCst), 1);
+        assert_eq!(exited.load(Ordering::SeqCst), 1);
     }
 }

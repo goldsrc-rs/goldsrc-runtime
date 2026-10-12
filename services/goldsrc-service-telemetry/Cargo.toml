@@ -7,6 +7,7 @@ description = "Host-side hardware metrics, tickrate, and system diagnostics serv
 
 [dependencies]
 sysinfo = "0.39.6"
+stitch-rs = { workspace = true }
 serde = { workspace = true, optional = true }
 
 [features]

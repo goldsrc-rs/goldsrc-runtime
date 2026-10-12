@@ -7,6 +7,7 @@ description = "Centralized filesystem watcher service and hot-reload debouncer f
 
 [dependencies]
 goldsrc-api = { workspace = true }
+stitch-rs = { workspace = true }
 notify = { version = "8.0", default-features = false, features = ["macos_kqueue"] }
 crossbeam-channel = "0.5"
 thiserror = { workspace = true }
