@@ -29,6 +29,9 @@ libloading = { workspace = true }
 thiserror = { workspace = true }
 semver = { workspace = true }
 stitch-rs = { workspace = true }
+statefs-core = { workspace = true }
+statefs-config = { workspace = true }
+statefs-codec-toml = { workspace = true }
 
 [features]
 default = ["cli"]

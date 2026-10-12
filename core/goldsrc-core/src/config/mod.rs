@@ -2,12 +2,14 @@
 
 pub mod adapter;
 pub mod autonomous;
+pub mod cvar;
 pub mod host;
 pub mod pipeline;
 pub mod plugins;
 
 pub use adapter::{ConfigBinder, CvarSettingsAdapter, TomlSettingsAdapter};
 pub use autonomous::{SelfHealingConfigEngine, deep_merge_toml};
+pub use cvar::CvarStorageAdapter;
 pub use pipeline::{ConsolePipelineConfig, PipelineDomainPolicy};
 
 pub use host::{
