@@ -6,6 +6,159 @@ use goldsrc_api::placeholders::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
+use stitch_rs::flow::FlowControl;
+
+/// Context passing through the placeholder resolution U-cycle.
+#[repr(C, align(64))]
+pub struct PlaceholderContext<'a> {
+    pub ident: &'a str,
+    pub caller_idx: i32,
+    pub param: &'a str,
+    pub resolved: Option<String>,
+}
+
+impl<'a> stitch_rs::Blackboard for PlaceholderContext<'a> {}
+
+impl<'a> PlaceholderContext<'a> {
+    pub fn new(ident: &'a str, caller_idx: i32, param: &'a str) -> Self {
+        Self {
+            ident,
+            caller_idx,
+            param,
+            resolved: None,
+        }
+    }
+
+    pub fn set_resolved(&mut self, val: impl Into<String>) {
+        self.resolved = Some(val.into());
+    }
+}
+
+/// The intent entering placeholder resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaceholderIntent<'a> {
+    pub ident: &'a str,
+}
+
+/// Middleware layer for intercepting, caching, or rewriting placeholders.
+pub trait PlaceholderLayer: Send + Sync {
+    /// Descent phase: check cache, rewrite, or short-circuit.
+    fn on_enter(
+        &self,
+        ctx: &mut PlaceholderContext<'_>,
+        intent: &PlaceholderIntent<'_>,
+    ) -> FlowControl<(), (), ()>;
+
+    /// Ascent phase: cache result, audit telemetry.
+    fn on_exit(
+        &self,
+        ctx: &mut PlaceholderContext<'_>,
+        intent: &PlaceholderIntent<'_>,
+        outcome: &mut Result<(), ()>,
+    );
+}
+
+/// Terminal leaf node terminating placeholder U-cycle descent.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlaceholderTerminal;
+
+impl stitch_rs::middleware::Terminal<PlaceholderContext<'_>, PlaceholderIntent<'_>, (), ()>
+    for PlaceholderTerminal
+{
+    #[inline(always)]
+    fn execute(
+        &mut self,
+        ctx: &mut PlaceholderContext<'_>,
+        _intent: PlaceholderIntent<'_>,
+    ) -> Result<(), ()> {
+        if ctx.resolved.is_some() {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+}
+
+/// Dynamic SMA placeholder pipeline runner.
+#[derive(Default, Clone)]
+pub struct PlaceholderPipeline {
+    layers: Vec<Arc<dyn PlaceholderLayer>>,
+}
+
+impl PlaceholderPipeline {
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    pub fn with_layer(mut self, layer: Arc<dyn PlaceholderLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(
+        &self,
+        ctx: &mut PlaceholderContext<'_>,
+        intent: &PlaceholderIntent<'_>,
+    ) -> Result<(), ()> {
+        let mut entered_count = 0;
+        let mut halted = false;
+
+        for layer in &self.layers {
+            match layer.on_enter(ctx, intent) {
+                FlowControl::Proceed(()) => {
+                    entered_count += 1;
+                }
+                FlowControl::ShortCircuit(()) => {
+                    entered_count += 1;
+                    break;
+                }
+                FlowControl::Halt(()) => {
+                    halted = true;
+                    break;
+                }
+            }
+        }
+
+        let mut outcome = if halted || ctx.resolved.is_none() {
+            Err(())
+        } else {
+            Ok(())
+        };
+
+        for layer in self.layers.iter().take(entered_count).rev() {
+            layer.on_exit(ctx, intent, &mut outcome);
+        }
+
+        outcome
+    }
+}
+
+static PLACEHOLDER_PIPELINE: LazyLock<RwLock<PlaceholderPipeline>> =
+    LazyLock::new(|| RwLock::new(PlaceholderPipeline::new()));
+
+/// Registers a custom middleware layer with the global placeholder pipeline.
+pub fn register_placeholder_layer(layer: Arc<dyn PlaceholderLayer>) {
+    let mut lock = PLACEHOLDER_PIPELINE
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    *lock = lock.clone().with_layer(layer);
+}
+
+/// Dispatches a placeholder resolution request through the global SMA U-cycle pipeline.
+#[allow(clippy::result_unit_err)]
+pub fn dispatch_placeholder_pipeline(
+    ctx: &mut PlaceholderContext<'_>,
+    intent: &PlaceholderIntent<'_>,
+) -> Result<(), ()> {
+    let pipeline = {
+        let lock = PLACEHOLDER_PIPELINE
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        lock.clone()
+    };
+    pipeline.dispatch(ctx, intent)
+}
 
 /// Global thread-safe registry of registered placeholder providers.
 static PLACEHOLDER_REGISTRY: LazyLock<RwLock<PlaceholderRegistry>> =
@@ -441,7 +594,14 @@ where
                             .or_else(|| call.get_named("target"))
                             .unwrap_or_default();
 
-                        let resolved = if let Some(ref mut d) = fallback_dispatcher {
+                        let mut ctx = PlaceholderContext::new(&call.ident, caller_index, param);
+                        let intent = PlaceholderIntent { ident: &call.ident };
+
+                        let resolved = if dispatch_placeholder_pipeline(&mut ctx, &intent).is_ok()
+                            && ctx.resolved.is_some()
+                        {
+                            ctx.resolved
+                        } else if let Some(ref mut d) = fallback_dispatcher {
                             d(&call.ident, caller_index, param)
                         } else {
                             let global_cb = {
@@ -507,5 +667,50 @@ mod tests {
             player,
         );
         assert_eq!(formatted, "Hello, Guest! Escaped: {escaped_tag}");
+    }
+
+    #[test]
+    fn test_placeholder_context_alignment() {
+        let ctx = PlaceholderContext::new("test", 1, "arg");
+        assert_eq!(std::mem::align_of_val(&ctx), 64);
+        assert!(ctx.resolved.is_none());
+    }
+
+    struct MockPlaceholderLayer;
+
+    impl PlaceholderLayer for MockPlaceholderLayer {
+        fn on_enter(
+            &self,
+            ctx: &mut PlaceholderContext<'_>,
+            intent: &PlaceholderIntent<'_>,
+        ) -> FlowControl<(), (), ()> {
+            if intent.ident == "sma_tag" {
+                ctx.set_resolved("SMA_RESOLVED_VALUE");
+                FlowControl::ShortCircuit(())
+            } else {
+                FlowControl::Proceed(())
+            }
+        }
+
+        fn on_exit(
+            &self,
+            _ctx: &mut PlaceholderContext<'_>,
+            _intent: &PlaceholderIntent<'_>,
+            _outcome: &mut Result<(), ()>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn test_placeholder_pipeline_u_cycle() {
+        let layer = Arc::new(MockPlaceholderLayer);
+        let pipeline = PlaceholderPipeline::new().with_layer(layer);
+
+        let mut ctx = PlaceholderContext::new("sma_tag", 1, "");
+        let intent = PlaceholderIntent { ident: "sma_tag" };
+
+        let res = pipeline.dispatch(&mut ctx, &intent);
+        assert_eq!(res, Ok(()));
+        assert_eq!(ctx.resolved.as_deref(), Some("SMA_RESOLVED_VALUE"));
     }
 }

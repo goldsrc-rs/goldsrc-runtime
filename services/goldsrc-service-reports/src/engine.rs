@@ -80,6 +80,13 @@ impl ReportAggregator {
 
     /// Appends a structured telemetry event to a specific active report.
     pub fn record_event(&self, id: &str, event: ReportEvent) -> bool {
+        let mut ctx = crate::ReportSubmissionContext::new(id, 1);
+        let intent = crate::ReportIntent::RecordEvent { id, event: &event };
+
+        if crate::dispatch_report_pipeline(&mut ctx, &intent).is_err() {
+            return false;
+        }
+
         let mut reports = self
             .active_reports
             .write()
@@ -111,6 +118,15 @@ impl ReportAggregator {
     /// Computes summary statistics, sends payload to all registered exporters,
     /// and removes the report from active tracking.
     pub fn finish_and_flush(&self, id: &str) -> Result<ReportPayload, ReportExportError> {
+        let mut ctx = crate::ReportSubmissionContext::new(id, 0);
+        let intent = crate::ReportIntent::Flush { id };
+
+        if crate::dispatch_report_pipeline(&mut ctx, &intent).is_err() {
+            return Err(ReportExportError::Custom(format!(
+                "Report flush '{id}' was suppressed by policy"
+            )));
+        }
+
         let active = {
             let mut reports = self
                 .active_reports

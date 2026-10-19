@@ -7,4 +7,5 @@ description = "Dual-mode tick-accurate task and timer service for GoldSrc.rs"
 
 [dependencies]
 goldsrc-api = { workspace = true }
+stitch-rs = { workspace = true }
 log = { workspace = true }

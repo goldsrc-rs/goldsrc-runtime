@@ -257,6 +257,128 @@ pub struct WatcherEvent {
     pub path: PathBuf,
 }
 
+use stitch_rs::flow::FlowControl;
+
+/// 64-byte aligned execution context for filesystem watch events under SMA.
+#[repr(C, align(64))]
+pub struct WatcherContext<'a> {
+    pub watcher_id: &'a str,
+    pub path: &'a Path,
+    pub is_suppressed: bool,
+}
+
+impl<'a> stitch_rs::Blackboard for WatcherContext<'a> {}
+
+impl<'a> WatcherContext<'a> {
+    pub fn new(watcher_id: &'a str, path: &'a Path) -> Self {
+        Self {
+            watcher_id,
+            path,
+            is_suppressed: false,
+        }
+    }
+
+    pub fn suppress(&mut self) {
+        self.is_suppressed = true;
+    }
+}
+
+/// The intent entering watch event processing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WatcherIntent<'a> {
+    pub watcher_id: &'a str,
+}
+
+/// Middleware layer for intercepting, filtering, or auditing filesystem events.
+pub trait WatcherLayer: Send + Sync {
+    /// Descent phase: inspect event, debounce or filter.
+    fn on_enter(
+        &self,
+        ctx: &mut WatcherContext<'_>,
+        intent: &WatcherIntent<'_>,
+    ) -> FlowControl<(), (), ()>;
+
+    /// Ascent phase: audit logging, external telemetry fan-out.
+    fn on_exit(
+        &self,
+        ctx: &mut WatcherContext<'_>,
+        intent: &WatcherIntent<'_>,
+        outcome: &mut Result<(), ()>,
+    );
+}
+
+/// Terminal leaf node terminating watcher event U-cycle descent.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WatcherTerminal;
+
+impl stitch_rs::middleware::Terminal<WatcherContext<'_>, WatcherIntent<'_>, (), ()>
+    for WatcherTerminal
+{
+    #[inline(always)]
+    fn execute(
+        &mut self,
+        ctx: &mut WatcherContext<'_>,
+        _intent: WatcherIntent<'_>,
+    ) -> Result<(), ()> {
+        if ctx.is_suppressed { Err(()) } else { Ok(()) }
+    }
+}
+
+/// Dynamic SMA watcher pipeline orchestrator.
+#[derive(Default, Clone)]
+pub struct WatcherPipeline {
+    layers: Vec<std::sync::Arc<dyn WatcherLayer>>,
+}
+
+impl WatcherPipeline {
+    pub fn new() -> Self {
+        Self { layers: Vec::new() }
+    }
+
+    pub fn with_layer(mut self, layer: std::sync::Arc<dyn WatcherLayer>) -> Self {
+        self.layers.push(layer);
+        self
+    }
+
+    #[allow(clippy::result_unit_err)]
+    pub fn dispatch(
+        &self,
+        ctx: &mut WatcherContext<'_>,
+        intent: &WatcherIntent<'_>,
+    ) -> Result<(), ()> {
+        let mut entered_count = 0;
+        let mut halted = false;
+
+        for layer in &self.layers {
+            match layer.on_enter(ctx, intent) {
+                FlowControl::Proceed(()) => {
+                    entered_count += 1;
+                }
+                FlowControl::ShortCircuit(()) => {
+                    entered_count += 1;
+                    break;
+                }
+                FlowControl::Halt(()) => {
+                    halted = true;
+                    break;
+                }
+            }
+        }
+
+        let mut outcome = if halted || ctx.is_suppressed {
+            Err(())
+        } else {
+            Ok(())
+        };
+
+        for layer in self.layers.iter().take(entered_count).rev() {
+            layer.on_exit(ctx, intent, &mut outcome);
+        }
+
+        outcome
+    }
+}
+
 /// Summary statistics of active/paused watchers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct WatcherOverview {
@@ -626,5 +748,53 @@ mod tests {
         let expected = normalize_path(&target_path);
         assert_eq!(watchers[0].path, expected);
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_watcher_context_alignment() {
+        let p = Path::new("cstrike/plugins/admin.wasm");
+        let ctx = WatcherContext::new("core:plugins", p);
+        assert_eq!(std::mem::align_of_val(&ctx), 64);
+        assert!(!ctx.is_suppressed);
+    }
+
+    struct MockWatcherSecurityLayer;
+
+    impl WatcherLayer for MockWatcherSecurityLayer {
+        fn on_enter(
+            &self,
+            ctx: &mut WatcherContext<'_>,
+            intent: &WatcherIntent<'_>,
+        ) -> FlowControl<(), (), ()> {
+            if intent.watcher_id == "blocked:watcher" {
+                ctx.suppress();
+                return FlowControl::Halt(());
+            }
+            FlowControl::Proceed(())
+        }
+
+        fn on_exit(
+            &self,
+            _ctx: &mut WatcherContext<'_>,
+            _intent: &WatcherIntent<'_>,
+            _outcome: &mut Result<(), ()>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn test_watcher_pipeline_u_cycle() {
+        let pipeline =
+            WatcherPipeline::new().with_layer(std::sync::Arc::new(MockWatcherSecurityLayer));
+        let p = Path::new("test.txt");
+
+        let mut ctx = WatcherContext::new("blocked:watcher", p);
+        let intent = WatcherIntent {
+            watcher_id: "blocked:watcher",
+        };
+
+        let res = pipeline.dispatch(&mut ctx, &intent);
+        assert_eq!(res, Err(()));
+        assert!(ctx.is_suppressed);
     }
 }
