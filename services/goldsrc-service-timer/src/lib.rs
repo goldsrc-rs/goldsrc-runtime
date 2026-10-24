@@ -12,7 +12,8 @@ pub use goldsrc_api::timer::{
 use std::collections::{BinaryHeap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
-use stitch_rs::flow::FlowControl;
+use stitch_rs::define_pipeline;
+pub use stitch_rs::flow::FlowControl;
 
 /// Trigger context intent representing an expiring timer or task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,94 +50,13 @@ impl TimerTriggerContext {
     }
 }
 
-/// Middleware layer for intercepting, auditing, or throttling timer triggers.
-pub trait TimerLayer: Send + Sync {
-    /// Descent phase: inspection, rate limiting, debugging.
-    fn on_enter(
-        &self,
-        ctx: &mut TimerTriggerContext,
-        intent: &TimerTriggerIntent,
-    ) -> FlowControl<(), (), ()>;
-
-    /// Ascent phase: telemetry, profiling, execution recording.
-    fn on_exit(
-        &self,
-        ctx: &mut TimerTriggerContext,
-        intent: &TimerTriggerIntent,
-        outcome: &mut Result<(), ()>,
-    );
-}
-
-/// Terminal leaf node terminating U-cycle descent for timer triggers.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TimerTerminal;
-
-impl stitch_rs::middleware::Terminal<TimerTriggerContext, TimerTriggerIntent, (), ()>
-    for TimerTerminal
-{
-    #[inline(always)]
-    fn execute(
-        &mut self,
-        ctx: &mut TimerTriggerContext,
-        _intent: TimerTriggerIntent,
-    ) -> Result<(), ()> {
-        if ctx.is_suppressed { Err(()) } else { Ok(()) }
-    }
-}
-
-/// Dynamic SMA timer pipeline orchestrator.
-#[derive(Default, Clone)]
-pub struct TimerPipeline {
-    layers: Vec<Arc<dyn TimerLayer>>,
-}
-
-impl TimerPipeline {
-    pub fn new() -> Self {
-        Self { layers: Vec::new() }
-    }
-
-    pub fn with_layer(mut self, layer: Arc<dyn TimerLayer>) -> Self {
-        self.layers.push(layer);
-        self
-    }
-
-    #[allow(clippy::result_unit_err)]
-    pub fn dispatch(
-        &self,
-        ctx: &mut TimerTriggerContext,
-        intent: &TimerTriggerIntent,
-    ) -> Result<(), ()> {
-        let mut halted = false;
-        let mut entered_count = 0;
-
-        for layer in &self.layers {
-            match layer.on_enter(ctx, intent) {
-                FlowControl::Proceed(()) => {
-                    entered_count += 1;
-                }
-                FlowControl::ShortCircuit(()) => {
-                    entered_count += 1;
-                    break;
-                }
-                FlowControl::Halt(()) => {
-                    halted = true;
-                    break;
-                }
-            }
-        }
-
-        let mut outcome = if halted || ctx.is_suppressed {
-            Err(())
-        } else {
-            Ok(())
-        };
-
-        for layer in self.layers.iter().take(entered_count).rev() {
-            layer.on_exit(ctx, intent, &mut outcome);
-        }
-
-        outcome
-    }
+define_pipeline! {
+    name: Timer,
+    context: TimerTriggerContext,
+    intent: TimerTriggerIntent,
+    outcome: (),
+    error: (),
+    vis: pub,
 }
 
 static TIMER_PIPELINE: LazyLock<RwLock<TimerPipeline>> =

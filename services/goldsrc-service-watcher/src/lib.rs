@@ -257,7 +257,8 @@ pub struct WatcherEvent {
     pub path: PathBuf,
 }
 
-use stitch_rs::flow::FlowControl;
+use stitch_rs::define_pipeline;
+pub use stitch_rs::flow::FlowControl;
 
 /// 64-byte aligned execution context for filesystem watch events under SMA.
 #[repr(C, align(64))]
@@ -289,94 +290,13 @@ pub struct WatcherIntent<'a> {
     pub watcher_id: &'a str,
 }
 
-/// Middleware layer for intercepting, filtering, or auditing filesystem events.
-pub trait WatcherLayer: Send + Sync {
-    /// Descent phase: inspect event, debounce or filter.
-    fn on_enter(
-        &self,
-        ctx: &mut WatcherContext<'_>,
-        intent: &WatcherIntent<'_>,
-    ) -> FlowControl<(), (), ()>;
-
-    /// Ascent phase: audit logging, external telemetry fan-out.
-    fn on_exit(
-        &self,
-        ctx: &mut WatcherContext<'_>,
-        intent: &WatcherIntent<'_>,
-        outcome: &mut Result<(), ()>,
-    );
-}
-
-/// Terminal leaf node terminating watcher event U-cycle descent.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct WatcherTerminal;
-
-impl stitch_rs::middleware::Terminal<WatcherContext<'_>, WatcherIntent<'_>, (), ()>
-    for WatcherTerminal
-{
-    #[inline(always)]
-    fn execute(
-        &mut self,
-        ctx: &mut WatcherContext<'_>,
-        _intent: WatcherIntent<'_>,
-    ) -> Result<(), ()> {
-        if ctx.is_suppressed { Err(()) } else { Ok(()) }
-    }
-}
-
-/// Dynamic SMA watcher pipeline orchestrator.
-#[derive(Default, Clone)]
-pub struct WatcherPipeline {
-    layers: Vec<std::sync::Arc<dyn WatcherLayer>>,
-}
-
-impl WatcherPipeline {
-    pub fn new() -> Self {
-        Self { layers: Vec::new() }
-    }
-
-    pub fn with_layer(mut self, layer: std::sync::Arc<dyn WatcherLayer>) -> Self {
-        self.layers.push(layer);
-        self
-    }
-
-    #[allow(clippy::result_unit_err)]
-    pub fn dispatch(
-        &self,
-        ctx: &mut WatcherContext<'_>,
-        intent: &WatcherIntent<'_>,
-    ) -> Result<(), ()> {
-        let mut entered_count = 0;
-        let mut halted = false;
-
-        for layer in &self.layers {
-            match layer.on_enter(ctx, intent) {
-                FlowControl::Proceed(()) => {
-                    entered_count += 1;
-                }
-                FlowControl::ShortCircuit(()) => {
-                    entered_count += 1;
-                    break;
-                }
-                FlowControl::Halt(()) => {
-                    halted = true;
-                    break;
-                }
-            }
-        }
-
-        let mut outcome = if halted || ctx.is_suppressed {
-            Err(())
-        } else {
-            Ok(())
-        };
-
-        for layer in self.layers.iter().take(entered_count).rev() {
-            layer.on_exit(ctx, intent, &mut outcome);
-        }
-
-        outcome
-    }
+define_pipeline! {
+    name: Watcher,
+    context: WatcherContext<'_>,
+    intent: WatcherIntent<'_>,
+    outcome: (),
+    error: (),
+    vis: pub,
 }
 
 /// Summary statistics of active/paused watchers.
