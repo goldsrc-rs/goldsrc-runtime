@@ -13,7 +13,7 @@ pub struct NetworkMessageDispatcher;
 impl NetworkMessageDispatcher {
     /// Dispatches a formatted message to a player according to the target print channel.
     pub fn dispatch_player_print(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         player_index: i32,
         target: PrintTarget,
         message: &str,
@@ -54,7 +54,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a `TextMsg` user message (console, notify, center text) to a single client.
     pub fn send_text_msg(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         player_index: i32,
         msg_dest: i32,
         formatted: &str,
@@ -71,7 +71,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a preformatted `TextMsg` payload directly to the wire, avoiding redundant allocations.
     pub fn send_text_msg_preformatted(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         player_index: i32,
         msg_dest: i32,
         payload: &str,
@@ -106,7 +106,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a `SayText` user message to a single client.
     pub fn send_say_text(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         receiver_index: i32,
         sender_index: i32,
         message: &str,
@@ -140,7 +140,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a preformatted `SayText` payload directly to the client.
     pub fn send_say_text_preformatted(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         receiver_index: i32,
         sender_index: i32,
         payload: &str,
@@ -180,7 +180,7 @@ impl NetworkMessageDispatcher {
     /// Broadcasts a `TextMsg` to all connected clients (`MessageDest::All`).
     /// Pre-formats message once, eliminating 32 duplicate heap string allocations.
     pub fn broadcast_text_msg(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         msg_dest: i32,
         message: &str,
     ) {
@@ -201,7 +201,7 @@ impl NetworkMessageDispatcher {
     /// Broadcasts a `SayText` message to all connected clients (`MessageDest::All`).
     /// Pre-formats chat line once, eliminating up to 64 duplicate heap allocations.
     pub fn broadcast_say_text(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         sender_index: i32,
         message: &str,
     ) {
@@ -221,7 +221,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a `ScreenFade` user message to a specific player or broadcasts to all clients.
     pub fn send_screen_fade(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         target_player: Option<i32>,
         fade: &goldsrc_api::hud::ScreenFade,
     ) {
@@ -257,7 +257,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a `DeathMsg` user message to a specific player or broadcasts to all clients.
     pub fn send_death_msg(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         target_player: Option<i32>,
         killer_index: i32,
         victim_index: i32,
@@ -290,7 +290,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a `CurWeapon` user message to a specific player.
     pub fn send_cur_weapon(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         player_index: i32,
         is_active: bool,
         weapon_id: i32,
@@ -321,7 +321,7 @@ impl NetworkMessageDispatcher {
 
     /// Sends a `Damage` user message to a specific player.
     pub fn send_damage(
-        engine: &dyn goldsrc_spi::engine::Engine,
+        engine: &dyn goldsrc_spi::engine::EnginePort,
         player_index: i32,
         save_damage: i32,
         take_damage: i32,
@@ -353,7 +353,7 @@ impl NetworkMessageDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goldsrc_api::cvar::{CvarEngine, CvarFlags};
+    use goldsrc_api::cvar::{CvarFlags, CvarPort};
     use goldsrc_api::entity::EntitySpawner;
     use goldsrc_spi::engine::{
         EngineConsole, EngineEntities, EngineExtensions, EngineMessages, EnginePhysics,
@@ -479,7 +479,7 @@ mod tests {
         fn dispatch_touch(&self, _touched: i32, _other: i32) {}
     }
 
-    impl CvarEngine for MockNetEngine {
+    impl CvarPort for MockNetEngine {
         fn cvar_get_string(&self, _n: &str) -> Option<String> {
             None
         }

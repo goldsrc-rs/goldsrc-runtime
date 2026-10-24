@@ -233,7 +233,7 @@ mod tests {
     #[cfg(feature = "storage")]
     #[test]
     fn test_sqlite_storage_exporter_integration() {
-        use goldsrc_service_storage::{SqliteStorageEngine, StorageProvider};
+        use goldsrc_service_storage::{SqliteStorageEngine, StoragePort};
 
         let unique_id = format!("goldsrc_test_storage_reports_{}", std::process::id());
         let temp_dir = std::env::temp_dir().join(unique_id);
@@ -241,7 +241,7 @@ mod tests {
 
         let storage = SqliteStorageEngine::open(&db_file).unwrap();
         let exporter =
-            StorageExporter::new(Arc::clone(&storage) as Arc<dyn StorageProvider>, "reports");
+            StorageExporter::new(Arc::clone(&storage) as Arc<dyn StoragePort>, "reports");
 
         let report = ReportPayload {
             id: "db_report_01".to_string(),

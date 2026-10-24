@@ -2,7 +2,7 @@
 //! and GoldSrc engine console variables.
 
 use goldsrc_api::cvar::ConfigModel;
-use goldsrc_spi::engine::Engine;
+use goldsrc_spi::engine::EnginePort;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::fs;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 pub struct ConfigBinder<T: ConfigModel> {
     path: PathBuf,
     model: T,
-    engine: Option<Arc<dyn Engine>>,
+    engine: Option<Arc<dyn EnginePort>>,
 }
 
 impl<T: ConfigModel + Serialize + DeserializeOwned + Default> ConfigBinder<T> {
@@ -21,7 +21,7 @@ impl<T: ConfigModel + Serialize + DeserializeOwned + Default> ConfigBinder<T> {
     pub fn new(
         path: impl Into<PathBuf>,
         default_model: T,
-        engine: Option<Arc<dyn Engine>>,
+        engine: Option<Arc<dyn EnginePort>>,
     ) -> Self {
         Self {
             path: path.into(),
@@ -225,7 +225,7 @@ pub struct CvarSettingsAdapter;
 impl CvarSettingsAdapter {
     /// Registers all settings in `Settings::schema()` as engine CVars with standard `ARCHIVE` flags.
     pub fn register_all<S: goldsrc_api::setting::Settings>(
-        engine: &dyn goldsrc_api::cvar::CvarEngine,
+        engine: &dyn goldsrc_api::cvar::CvarPort,
         _settings: &S,
     ) {
         let schema = S::schema();
@@ -241,7 +241,7 @@ impl CvarSettingsAdapter {
 
     /// Synchronizes engine CVar values into the aggregate `Settings` via `CvarStorageAdapter`.
     pub fn sync_from_cvars<S: goldsrc_api::setting::Settings>(
-        engine: &dyn goldsrc_api::cvar::CvarEngine,
+        engine: &dyn goldsrc_api::cvar::CvarPort,
         settings: &S,
     ) -> Result<(), goldsrc_api::setting::SettingError> {
         let schema = S::schema();
@@ -266,7 +266,7 @@ impl CvarSettingsAdapter {
 
     /// Synchronizes current aggregate `Settings` values into engine CVars via `CvarStorageAdapter`.
     pub fn sync_to_cvars<S: goldsrc_api::setting::Settings>(
-        engine: &dyn goldsrc_api::cvar::CvarEngine,
+        engine: &dyn goldsrc_api::cvar::CvarPort,
         settings: &S,
     ) {
         let tree = settings.export_tree();
@@ -312,7 +312,7 @@ impl CvarSettingsAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goldsrc_api::cvar::CvarEngine;
+    use goldsrc_api::cvar::CvarPort;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -339,7 +339,7 @@ mod tests {
             )
         }
 
-        fn register_cvars(&self, engine: &dyn CvarEngine) {
+        fn register_cvars(&self, engine: &dyn CvarPort) {
             engine.cvar_register(
                 "test_bonus_hp",
                 &self.bonus_hp.to_string(),
@@ -353,7 +353,7 @@ mod tests {
             );
         }
 
-        fn sync_from_cvars(&mut self, engine: &dyn CvarEngine) {
+        fn sync_from_cvars(&mut self, engine: &dyn CvarPort) {
             self.bonus_hp = engine.cvar_get_float("test_bonus_hp") as i32;
             if let Some(t) = engine.cvar_get_string("test_tag") {
                 self.tag = t;
@@ -361,7 +361,7 @@ mod tests {
             self.enabled = engine.cvar_get_float("test_enabled") > 0.0;
         }
 
-        fn sync_to_cvars(&self, engine: &dyn CvarEngine) {
+        fn sync_to_cvars(&self, engine: &dyn CvarPort) {
             engine.cvar_set_float("test_bonus_hp", self.bonus_hp as f32);
             engine.cvar_set_string("test_tag", &self.tag);
             engine.cvar_set_float("test_enabled", if self.enabled { 1.0 } else { 0.0 });
@@ -418,7 +418,7 @@ mod tests {
         }
     }
 
-    impl goldsrc_api::cvar::CvarEngine for MockEngineCvarStore {
+    impl goldsrc_api::cvar::CvarPort for MockEngineCvarStore {
         fn cvar_register(
             &self,
             name: &str,

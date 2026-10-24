@@ -7,7 +7,7 @@
 //! - Synchronous transactional flush on `client_disconnect` and `ServerDeactivate`.
 
 use goldsrc_api::consts::log_targets;
-pub use goldsrc_spi::storage::{StorageError, StorageProvider};
+pub use goldsrc_spi::storage::{StorageError, StoragePort};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -277,7 +277,7 @@ impl SqliteStorageEngine {
     }
 }
 
-impl StorageProvider for SqliteStorageEngine {
+impl StoragePort for SqliteStorageEngine {
     fn get(&self, bucket: &str, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         // 1. Check in-memory cache first (Zero-alloc: borrows &str keys directly)
         {
@@ -481,14 +481,14 @@ impl StorageFormat for JsonFormat {
 /// Strongly-typed Key-Value Bucket facade for plugins (framework layer).
 #[derive(Clone)]
 pub struct Bucket<T, F: StorageFormat = JsonFormat> {
-    provider: Arc<dyn StorageProvider>,
+    provider: Arc<dyn StoragePort>,
     name: String,
     _marker: PhantomData<(T, F)>,
 }
 
 impl<T, F: StorageFormat> Bucket<T, F> {
     /// Creates a new typed bucket handle with the specified format policy.
-    pub fn new<S: Into<String>>(provider: Arc<dyn StorageProvider>, name: S) -> Self {
+    pub fn new<S: Into<String>>(provider: Arc<dyn StoragePort>, name: S) -> Self {
         Self {
             provider,
             name: name.into(),

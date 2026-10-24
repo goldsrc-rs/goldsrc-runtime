@@ -2,7 +2,7 @@ use super::EngineBackend;
 use crate::{call_engfunc, call_engfunc_ret};
 use goldsrc_api::consts::FL_CLIENT;
 use goldsrc_api::consts::log_targets::CORE;
-use goldsrc_api::cvar::CvarEngine;
+use goldsrc_api::cvar::CvarPort;
 use goldsrc_api::entity::EntitySpawner;
 use goldsrc_api::{Angles, Armor, Health, Origin, Velocity};
 use goldsrc_spi::engine::{EngineEntities, EngineMessages, MessageDest};

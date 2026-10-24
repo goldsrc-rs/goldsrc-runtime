@@ -5,6 +5,7 @@
 //! requirements such as `ext:reapi`, `ext:rehlds`, or `ext:regamedll`.
 
 pub mod bridge;
+pub mod c_abi;
 pub mod capabilities;
 pub mod extension;
 

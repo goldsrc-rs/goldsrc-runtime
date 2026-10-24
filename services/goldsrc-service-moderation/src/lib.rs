@@ -6,7 +6,7 @@
 
 use goldsrc_api::HUD_PRINTCHAT;
 use goldsrc_api::command::Command;
-use goldsrc_spi::engine::Engine;
+use goldsrc_spi::engine::EnginePort;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -104,7 +104,7 @@ pub fn dispatch_moderation(
 }
 
 /// Provider hook for engine callbacks (e.g. HostRuntime::engine).
-pub type EngineProvider = Arc<dyn Fn() -> Option<Arc<dyn Engine>> + Send + Sync>;
+pub type EngineProvider = Arc<dyn Fn() -> Option<Arc<dyn EnginePort>> + Send + Sync>;
 
 static ENGINE_PROVIDER: LazyLock<RwLock<Option<EngineProvider>>> =
     LazyLock::new(|| RwLock::new(None));
@@ -112,14 +112,14 @@ static ENGINE_PROVIDER: LazyLock<RwLock<Option<EngineProvider>>> =
 /// Configures the engine provider callback.
 pub fn set_engine_provider<F>(f: F)
 where
-    F: Fn() -> Option<Arc<dyn Engine>> + Send + Sync + 'static,
+    F: Fn() -> Option<Arc<dyn EnginePort>> + Send + Sync + 'static,
 {
     let mut lock = ENGINE_PROVIDER.write().unwrap_or_else(|e| e.into_inner());
     *lock = Some(Arc::new(f));
 }
 
 /// Retrieves the active game engine bridge if available.
-pub fn active_engine() -> Option<Arc<dyn Engine>> {
+pub fn active_engine() -> Option<Arc<dyn EnginePort>> {
     let lock = ENGINE_PROVIDER.read().unwrap_or_else(|e| e.into_inner());
     lock.as_ref().and_then(|f| f())
 }

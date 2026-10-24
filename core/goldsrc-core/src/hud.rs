@@ -1,10 +1,10 @@
 //! Network serialization and dispatching for HUD and DHUD screen messages.
 
 use goldsrc_api::hud::{HudEffect, HudKind, HudMessage};
-use goldsrc_spi::engine::Engine;
+use goldsrc_spi::engine::EnginePort;
 
 /// Serializes and sends a `HudMessage` to a target player (or all players if player_idx is None).
-pub fn send_hud_message(engine: &dyn Engine, player_idx: Option<i32>, msg: &HudMessage) {
+pub fn send_hud_message(engine: &dyn EnginePort, player_idx: Option<i32>, msg: &HudMessage) {
     let (dest, target_idx) = match player_idx {
         Some(idx) => (
             goldsrc_spi::engine::MessageDest::OneUnreliable as i32,

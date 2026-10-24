@@ -5,7 +5,7 @@ use crate::error::LoadError;
 use crate::manager::state::HostState;
 use crate::plugin::{LoadedPlugin, PluginMetadata, PluginStatus};
 use goldsrc_api::consts::log_targets;
-use goldsrc_spi::engine::Engine as GoldsrcEngine;
+use goldsrc_spi::engine::EnginePort as GoldsrcEngine;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

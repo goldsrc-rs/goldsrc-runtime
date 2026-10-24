@@ -58,8 +58,6 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "log",
- "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -523,7 +521,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc-api"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#5a0b9089e44c8cfd8f1f512116768fe3ce522cc7"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#d9ca5242b5397850f266ce03a43c39ad200b89cb"
 dependencies = [
  "goldsrc-spi",
  "goldsrc-sys",
@@ -753,7 +751,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-spi"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#5a0b9089e44c8cfd8f1f512116768fe3ce522cc7"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#d9ca5242b5397850f266ce03a43c39ad200b89cb"
 dependencies = [
  "serde",
  "stitch-core",
@@ -763,7 +761,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#5a0b9089e44c8cfd8f1f512116768fe3ce522cc7"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#d9ca5242b5397850f266ce03a43c39ad200b89cb"
 dependencies = [
  "bindgen",
 ]

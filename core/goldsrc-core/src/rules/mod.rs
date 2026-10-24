@@ -4,14 +4,14 @@ pub use orchestrator::RuleOrchestrator;
 use crate::plugins_config::PluginsConfig;
 use goldsrc_api::consts::log_targets;
 use goldsrc_api::rules::{RuleAction, RuleCondition, RuleScope};
-use goldsrc_spi::engine::Engine;
+use goldsrc_spi::engine::EnginePort;
 use std::collections::HashMap;
 
 /// Server context provided during rule evaluation.
 pub struct ServerRuleContext<'a> {
     pub map_name: &'a str,
     pub player_count: usize,
-    pub engine: &'a dyn Engine,
+    pub engine: &'a dyn EnginePort,
     pub plugins_config: &'a mut PluginsConfig,
     pub paused_plugins: &'a mut HashMap<String, bool>,
     /// Deliberate manual overrides initiated by administrator console commands (e.g. `grs pause`, `grs unpause`).
@@ -412,7 +412,7 @@ pub fn create_default_server_rule_registry<'a>()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goldsrc_api::cvar::{CvarEngine, CvarFlags};
+    use goldsrc_api::cvar::{CvarFlags, CvarPort};
     use goldsrc_api::entity::EntitySpawner;
     use goldsrc_api::rules::Rule;
     use goldsrc_spi::engine::{
@@ -495,7 +495,7 @@ mod tests {
         }
         fn dispatch_touch(&self, _touched: i32, _other: i32) {}
     }
-    impl CvarEngine for MockEngine {
+    impl CvarPort for MockEngine {
         fn cvar_get_float(&self, _n: &str) -> f32 {
             0.0
         }

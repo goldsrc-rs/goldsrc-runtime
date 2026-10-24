@@ -3,13 +3,13 @@
 //! Provides zero-overhead access to ReAPI extensions, queries `CreateInterface`
 //! dynamically on module load, and verifies major/minor version compatibility.
 
-use crate::capabilities::{ReApiStatus, ReGameCapabilities, RehldsCapabilities};
-use goldsrc_api::consts::log_targets;
-use goldsrc_sys::reapi::{
+use crate::c_abi::{
     CreateInterfaceFn, IReGameApi, IRehldsApi, REGAMEDLL_API_VERSION_MAJOR,
     REGAMEDLL_API_VERSION_MINOR, REHLDS_API_VERSION_MAJOR, REHLDS_API_VERSION_MINOR, ReGameFuncs_t,
     RehldsFuncs_t, VRE_GAMEDLL_API_VERSION, VREHLDS_HLDS_API_VERSION,
 };
+use crate::capabilities::{ReApiStatus, ReGameCapabilities, RehldsCapabilities};
+use goldsrc_api::consts::log_targets;
 use std::ffi::{c_char, c_int};
 use std::sync::RwLock;
 

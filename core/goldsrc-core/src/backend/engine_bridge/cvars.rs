@@ -2,7 +2,7 @@
 
 use super::EngineBackend;
 use crate::{call_engfunc, call_engfunc_ret};
-use goldsrc_api::cvar::CvarEngine;
+use goldsrc_api::cvar::CvarPort;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
@@ -98,7 +98,7 @@ pub fn query_cvar_info(name: &str) -> Option<CvarInfo> {
     None
 }
 
-impl CvarEngine for EngineBackend {
+impl CvarPort for EngineBackend {
     fn cvar_get_float(&self, name: &str) -> f32 {
         unsafe {
             let cname = std::ffi::CString::new(name).unwrap_or_default();

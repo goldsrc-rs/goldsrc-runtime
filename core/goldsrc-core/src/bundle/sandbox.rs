@@ -70,11 +70,7 @@ impl BundleFsSandbox {
             BackendType::Standalone => PathBuf::from(goldsrc_api::consts::FRAMEWORK_NAME),
         };
 
-        let base = if s_root.ends_with(goldsrc_api::consts::DEFAULT_MOD_DIR) {
-            s_root.clone()
-        } else {
-            s_root.join(goldsrc_api::consts::DEFAULT_MOD_DIR)
-        };
+        let base = s_root.clone();
 
         let data_dir = base
             .join(&fw_rel)

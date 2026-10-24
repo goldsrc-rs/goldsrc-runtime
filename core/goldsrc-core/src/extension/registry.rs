@@ -4,14 +4,14 @@
 //! via `semver`, and lifecycle event broadcasting.
 
 use goldsrc_api::consts::log_targets;
-use goldsrc_spi::EngineExtension;
+use goldsrc_spi::ExtensionPort;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 /// Thread-safe registry holding all discoverable engine extensions.
 #[derive(Default)]
 pub struct ExtensionRegistry {
-    extensions: RwLock<HashMap<String, Arc<dyn EngineExtension>>>,
+    extensions: RwLock<HashMap<String, Arc<dyn ExtensionPort>>>,
 }
 
 impl ExtensionRegistry {
@@ -23,7 +23,7 @@ impl ExtensionRegistry {
     }
 
     /// Registers an extension into the registry.
-    pub fn register(&self, extension: Arc<dyn EngineExtension>) {
+    pub fn register(&self, extension: Arc<dyn ExtensionPort>) {
         let name = extension.name().to_ascii_lowercase();
         log::debug!(
             target: log_targets::CORE,
@@ -37,7 +37,7 @@ impl ExtensionRegistry {
     }
 
     /// Retrieves an extension by its canonical name.
-    pub fn get(&self, name: &str) -> Option<Arc<dyn EngineExtension>> {
+    pub fn get(&self, name: &str) -> Option<Arc<dyn ExtensionPort>> {
         let name_lower = name.to_ascii_lowercase();
         self.extensions
             .read()
@@ -95,7 +95,7 @@ impl ExtensionRegistry {
     }
 
     /// Returns a list of all registered extensions.
-    pub fn all(&self) -> Vec<Arc<dyn EngineExtension>> {
+    pub fn all(&self) -> Vec<Arc<dyn ExtensionPort>> {
         self.extensions
             .read()
             .map(|map| map.values().cloned().collect())
@@ -150,7 +150,7 @@ mod tests {
         active: bool,
     }
 
-    impl EngineExtension for MockExtension {
+    impl ExtensionPort for MockExtension {
         fn name(&self) -> &'static str {
             self.name
         }
