@@ -119,14 +119,14 @@ impl ReportExporter for MemoryCollectorExporter {
 #[cfg(feature = "storage")]
 /// Exporter saving serialized reports directly into `goldsrc-service-storage`.
 pub struct StorageExporter {
-    storage: Arc<dyn goldsrc_service_storage::StorageProvider>,
+    storage: Arc<dyn goldsrc_service_storage::StoragePort>,
     bucket: String,
 }
 
 #[cfg(feature = "storage")]
 impl StorageExporter {
     pub fn new(
-        storage: Arc<dyn goldsrc_service_storage::StorageProvider>,
+        storage: Arc<dyn goldsrc_service_storage::StoragePort>,
         bucket: impl Into<String>,
     ) -> Self {
         Self {

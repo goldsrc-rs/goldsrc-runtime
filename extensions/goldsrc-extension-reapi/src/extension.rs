@@ -1,17 +1,17 @@
 //! ReAPI subsystem modular engine extensions.
 //!
-//! Exposes ReHLDS and ReGameDLL capabilities as first-class `EngineExtension` instances
+//! Exposes ReHLDS and ReGameDLL capabilities as first-class `ExtensionPort` instances
 //! queryable by plugins via `ext:reapi`, `ext:rehlds`, and `ext:regamedll`.
 
 use crate::bridge::ReApiBridge;
 use crate::capabilities::{ReGameCapabilities, RehldsCapabilities};
-use goldsrc_spi::EngineExtension;
+use goldsrc_spi::ExtensionPort;
 use std::any::Any;
 
 /// Composite ReAPI engine extension (`ext:reapi`).
 pub struct ReApiExtension;
 
-impl EngineExtension for ReApiExtension {
+impl ExtensionPort for ReApiExtension {
     fn name(&self) -> &'static str {
         "reapi"
     }
@@ -63,7 +63,7 @@ impl ReGameCapabilities for ReApiExtension {
 /// ReHLDS dedicated server engine extension (`ext:rehlds`).
 pub struct RehldsExtension;
 
-impl EngineExtension for RehldsExtension {
+impl ExtensionPort for RehldsExtension {
     fn name(&self) -> &'static str {
         "rehlds"
     }
@@ -107,7 +107,7 @@ impl RehldsCapabilities for RehldsExtension {
 /// ReGameDLL game logic extension (`ext:regamedll`).
 pub struct ReGameDllExtension;
 
-impl EngineExtension for ReGameDllExtension {
+impl ExtensionPort for ReGameDllExtension {
     fn name(&self) -> &'static str {
         "regamedll"
     }

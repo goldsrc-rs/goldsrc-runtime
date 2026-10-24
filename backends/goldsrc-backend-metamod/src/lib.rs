@@ -69,7 +69,7 @@ pub fn init_wasm_host() {
     goldsrc_core::backend::set_user_msg_resolver(|name| {
         goldsrc_extension_metamod::MetamodApi::get_user_msg_id(name).unwrap_or(0)
     });
-    let engine: std::sync::Arc<dyn goldsrc_spi::engine::Engine> = std::sync::Arc::new(
+    let engine: std::sync::Arc<dyn goldsrc_spi::engine::EnginePort> = std::sync::Arc::new(
         goldsrc_core::backend::EngineBackend::new(engfuncs, &PRINT_QUEUE),
     );
     goldsrc_extension_reapi::init();

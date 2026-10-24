@@ -1,4 +1,4 @@
-//! Engine function table bridge implementing `goldsrc_spi::engine::Engine`.
+//! Engine function table bridge implementing `goldsrc_spi::engine::EnginePort`.
 
 use crate::backend::print_queue::PrintQueue;
 use crate::call_engfunc;

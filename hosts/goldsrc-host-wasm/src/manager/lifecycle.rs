@@ -1,7 +1,7 @@
 //! Dependency resolution and lifecycle state transitions.
 
 use crate::plugin::{LoadedPlugin, PluginStatus};
-use goldsrc_spi::engine::Engine as GoldsrcEngine;
+use goldsrc_spi::engine::EnginePort as GoldsrcEngine;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;

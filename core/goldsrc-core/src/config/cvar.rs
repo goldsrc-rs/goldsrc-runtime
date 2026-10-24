@@ -4,11 +4,11 @@
 //! for the GoldSrc engine CVAR subsystem according to Sewing Machine Architecture (SMA).
 //!
 //! ### Architectural Role (SMA Triad)
-//! - **Provider**: GoldSrc Game Engine C-ABI memory (`cvar_t*` and CvarEngine/Engine SPI).
+//! - **Provider**: GoldSrc Game Engine C-ABI memory (`cvar_t*` and CvarPort/Engine SPI).
 //! - **Adapter**: [`CvarStorageAdapter`] bridging engine CVARs and hierarchical StateFS paths.
 //! - **Port**: [`statefs_config::ConfigStoragePort`] / [`statefs_config::ConfigStorageMut`].
 
-use goldsrc_spi::cvar::{CvarEngine, CvarFlags};
+use goldsrc_spi::cvar::{CvarFlags, CvarPort};
 use statefs_config::ConfigError;
 use statefs_config::storage::port::{ConfigStorageMut, ConfigStoragePort};
 use statefs_core::{MemStore, Node, Path, Store, Value};
@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// Keeps an in-memory cached [`MemStore`] mirror for zero-allocation sub-nanosecond queries
 /// and synchronization with the engine.
 pub struct CvarStorageAdapter {
-    engine: Option<Arc<dyn CvarEngine>>,
+    engine: Option<Arc<dyn CvarPort>>,
     store: MemStore,
     prefix: String,
 }
@@ -38,7 +38,7 @@ impl CvarStorageAdapter {
     }
 
     /// Creates a new `CvarStorageAdapter` bound to the engine's CVAR provider.
-    pub fn with_engine(engine: Arc<dyn CvarEngine>) -> Self {
+    pub fn with_engine(engine: Arc<dyn CvarPort>) -> Self {
         Self {
             engine: Some(engine),
             store: MemStore::new(),
@@ -218,7 +218,7 @@ mod tests {
         }
     }
 
-    impl CvarEngine for MockEngine {
+    impl CvarPort for MockEngine {
         fn cvar_register(&self, name: &str, default_val: &str, _flags: CvarFlags) -> bool {
             let mut lock = self.cvars.lock().unwrap();
             lock.insert(name.to_string(), default_val.to_string());

@@ -55,7 +55,7 @@ impl PluginOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goldsrc_api::cvar::{CvarEngine, CvarFlags};
+    use goldsrc_api::cvar::{CvarFlags, CvarPort};
     use goldsrc_api::entity::EntitySpawner;
     use goldsrc_spi::engine::{
         EngineConsole, EngineEntities, EngineExtensions, EngineMessages, EnginePhysics,
@@ -144,7 +144,7 @@ mod tests {
         }
         fn dispatch_touch(&self, _touched: i32, _other: i32) {}
     }
-    impl CvarEngine for NoopEngine {
+    impl CvarPort for NoopEngine {
         fn cvar_get_string(&self, _n: &str) -> Option<String> {
             None
         }

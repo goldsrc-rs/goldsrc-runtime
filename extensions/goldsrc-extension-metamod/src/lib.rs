@@ -9,7 +9,7 @@ pub mod types;
 pub use api::{MetamodApi, set_meta_globals, set_meta_util_funcs};
 pub use types::*;
 
-use goldsrc_spi::EngineExtension;
+use goldsrc_spi::ExtensionPort;
 use std::sync::Arc;
 
 /// Metamod plugin manager engine extension (`ext:metamod`).
@@ -33,7 +33,7 @@ impl MetamodExtension {
     }
 }
 
-impl EngineExtension for MetamodExtension {
+impl ExtensionPort for MetamodExtension {
     fn name(&self) -> &'static str {
         "metamod"
     }

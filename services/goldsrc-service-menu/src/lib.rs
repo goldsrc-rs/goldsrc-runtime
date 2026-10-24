@@ -9,7 +9,7 @@ use goldsrc_api::menu::{
     ExitBehavior, Menu, MenuContext, MenuPresentationIntent, MenuRendererKind, PreemptionStrategy,
     RenderedMenuPage, SlotAction,
 };
-use goldsrc_spi::engine::Engine;
+use goldsrc_spi::engine::EnginePort;
 
 use stitch_rs::flow::FlowControl;
 
@@ -231,7 +231,7 @@ impl MenuSessionManager {
         &mut self,
         player_idx: i32,
         new_menu: Menu,
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         current_time: f32,
     ) {
         // Check required capability
@@ -352,7 +352,7 @@ impl MenuSessionManager {
         player_idx: i32,
         menu: Menu,
         history: Vec<(Arc<Menu>, usize)>,
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         current_time: f32,
     ) {
         let expiry = if menu.timeout_seconds > 0 {
@@ -378,7 +378,7 @@ impl MenuSessionManager {
     pub fn resume_or_next_menu(
         &mut self,
         player_idx: i32,
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         current_time: f32,
     ) -> bool {
         // 1. Try suspended sessions stack (LIFO)
@@ -433,7 +433,7 @@ impl MenuSessionManager {
         &mut self,
         player_idx: i32,
         slot: u8,
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         current_time: f32,
     ) -> bool {
         let Some(mut session) = self.sessions.remove(&player_idx) else {
@@ -705,7 +705,7 @@ impl MenuSessionManager {
     }
 
     /// Clears the active menu for a player.
-    pub fn close_menu(&mut self, player_idx: i32, engine: &dyn Engine, current_time: f32) {
+    pub fn close_menu(&mut self, player_idx: i32, engine: &dyn EnginePort, current_time: f32) {
         self.sessions.remove(&player_idx);
         if !self.resume_or_next_menu(player_idx, engine, current_time) {
             Self::clear_client_menu(player_idx, engine);
@@ -741,7 +741,12 @@ impl MenuSessionManager {
     }
 
     /// Re-renders and sends the currently open menu for `player_idx` if present (e.g. on language change).
-    pub fn refresh_player_menu(&mut self, player_idx: i32, engine: &dyn Engine, current_time: f32) {
+    pub fn refresh_player_menu(
+        &mut self,
+        player_idx: i32,
+        engine: &dyn EnginePort,
+        current_time: f32,
+    ) {
         let round_number = self.round_number;
         let round_start_time = self.round_start_time;
         if let Some(session) = self.sessions.get_mut(&player_idx) {
@@ -761,7 +766,7 @@ impl MenuSessionManager {
     }
 
     /// Re-renders and sends all currently open menus for all connected players.
-    pub fn refresh_all_menus(&mut self, engine: &dyn Engine, current_time: f32) {
+    pub fn refresh_all_menus(&mut self, engine: &dyn EnginePort, current_time: f32) {
         let round_number = self.round_number;
         let round_start_time = self.round_start_time;
         for (&player_idx, session) in self.sessions.iter_mut() {
@@ -781,7 +786,7 @@ impl MenuSessionManager {
     }
 
     /// Frame tick checking timeouts.
-    pub fn tick_frame(&mut self, current_time: f32, engine: &dyn Engine) {
+    pub fn tick_frame(&mut self, current_time: f32, engine: &dyn EnginePort) {
         let mut expired = Vec::new();
         for (&player_idx, session) in self.sessions.iter() {
             if let Some(expiry) = session.expiry_time
@@ -803,7 +808,7 @@ impl MenuSessionManager {
         &self,
         player_idx: i32,
         session: &mut PlayerMenuSession,
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         current_time: f32,
     ) {
         Self::render_and_send_session(
@@ -821,7 +826,7 @@ impl MenuSessionManager {
         round_start_time: f32,
         player_idx: i32,
         session: &mut PlayerMenuSession,
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         current_time: f32,
     ) {
         let is_alive = engine.entity_health(player_idx) > 0.0;
@@ -884,7 +889,7 @@ impl MenuSessionManager {
     /// Sends a `ShowMenu` message chunked across multiple packets using the GoldSrc `multipart` flag
     /// to avoid exceeding the engine's 192-byte UserMessage buffer limit.
     pub fn send_show_menu_chunked(
-        engine: &dyn Engine,
+        engine: &dyn EnginePort,
         player_idx: i32,
         keys_mask: i32,
         timeout: i32,
@@ -950,7 +955,7 @@ impl MenuSessionManager {
         }
     }
 
-    fn clear_client_menu(player_idx: i32, engine: &dyn Engine) {
+    fn clear_client_menu(player_idx: i32, engine: &dyn EnginePort) {
         // 1. Clear ShowMenu (keys = 0)
         let show_menu_id = engine.reg_user_msg("ShowMenu", -1);
         if show_menu_id > 0 && show_menu_id != 255 {
@@ -991,7 +996,7 @@ impl Default for MenuSessionManager {
 }
 
 /// Serializes and sends a `HudMessage` to a target player (or all players if player_idx is None).
-pub fn send_hud_message(engine: &dyn Engine, player_idx: Option<i32>, msg: &HudMessage) {
+pub fn send_hud_message(engine: &dyn EnginePort, player_idx: Option<i32>, msg: &HudMessage) {
     let (dest, target_idx) = match player_idx {
         Some(idx) => (
             goldsrc_spi::engine::MessageDest::OneUnreliable as i32,
@@ -1094,7 +1099,7 @@ pub fn menu_manager() -> &'static Mutex<MenuSessionManager> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use goldsrc_api::cvar::{CvarEngine, CvarFlags};
+    use goldsrc_api::cvar::{CvarFlags, CvarPort};
     use goldsrc_api::entity::EntitySpawner;
     use goldsrc_api::menu::{MenuItem, MenuStyle};
     use goldsrc_spi::engine::{
@@ -1177,7 +1182,7 @@ mod tests {
         }
         fn dispatch_touch(&self, _touched: i32, _other: i32) {}
     }
-    impl CvarEngine for MockEngine {
+    impl CvarPort for MockEngine {
         fn cvar_get_float(&self, _n: &str) -> f32 {
             0.0
         }

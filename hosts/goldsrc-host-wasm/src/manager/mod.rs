@@ -13,7 +13,7 @@ pub use state::HostState;
 
 use crate::error::{CommandError, LoadError};
 use crate::plugin::{LoadedPlugin, PluginMetadata, PluginStatus};
-use goldsrc_spi::engine::Engine as GoldsrcEngine;
+use goldsrc_spi::engine::EnginePort as GoldsrcEngine;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -658,7 +658,7 @@ pub fn register_host_placeholder(name: &str, plugin_name: &str) {
 mod tests {
     use super::*;
     use crate::bindings::goldsrc::engine::api::Host;
-    use goldsrc_api::cvar::{CvarEngine, CvarFlags};
+    use goldsrc_api::cvar::{CvarFlags, CvarPort};
     use goldsrc_api::entity::EntitySpawner;
     use goldsrc_spi::engine::{
         EngineConsole, EngineEntities, EngineExtensions, EngineMessages, EnginePhysics,
@@ -760,7 +760,7 @@ mod tests {
         fn dispatch_touch(&self, _touched: i32, _other: i32) {}
     }
 
-    impl CvarEngine for NoopEngineOps {
+    impl CvarPort for NoopEngineOps {
         fn cvar_get_float(&self, _name: &str) -> f32 {
             0.0
         }
@@ -1039,7 +1039,7 @@ mod tests {
         fn dispatch_touch(&self, _touched: i32, _other: i32) {}
     }
 
-    impl CvarEngine for MockMessageEngine {
+    impl CvarPort for MockMessageEngine {
         fn cvar_get_float(&self, _name: &str) -> f32 {
             0.0
         }

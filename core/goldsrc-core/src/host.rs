@@ -2,12 +2,12 @@ use crate::{HostConfig, paths::PathResolver};
 use goldsrc_api::consts::{BackendType, log_targets};
 use goldsrc_host_wasm::PluginManager;
 use goldsrc_host_wasm::error::HostError;
-use goldsrc_spi::storage::StorageProvider;
+use goldsrc_spi::storage::StoragePort;
 
 pub struct HostRuntime {
     pub backend: BackendType,
     manager: PluginManager,
-    engine: std::sync::Arc<dyn goldsrc_spi::engine::Engine>,
+    engine: std::sync::Arc<dyn goldsrc_spi::engine::EnginePort>,
     pub storage: std::sync::Arc<crate::storage::SqliteStorageEngine>,
     pub plugins_config: crate::plugins_config::PluginsConfig,
     pub paused_plugins: std::collections::HashMap<String, bool>,
@@ -22,7 +22,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 static RUNTIME: OnceLock<Mutex<HostRuntime>> = OnceLock::new();
-static ENGINE_INSTANCE: OnceLock<std::sync::Arc<dyn goldsrc_spi::engine::Engine>> = OnceLock::new();
+static ENGINE_INSTANCE: OnceLock<std::sync::Arc<dyn goldsrc_spi::engine::EnginePort>> =
+    OnceLock::new();
 static BACKEND_TYPE: OnceLock<BackendType> = OnceLock::new();
 
 thread_local! {
@@ -224,12 +225,12 @@ impl<'a> HostEvent<'a> {
 impl HostRuntime {
     /// Initialize the host runtime, logger, configuration, storage, i18n and hot reload watchers.
     ///
-    /// `engine` is the backend's [`goldsrc_spi::engine::Engine`] bridge — it gives
+    /// `engine` is the backend's [`goldsrc_spi::engine::EnginePort`] bridge — it gives
     /// WASM plugins access to the real game state. Call once at backend init.
     pub fn init(
         backend: BackendType,
         print_cb: fn(&str),
-        engine: std::sync::Arc<dyn goldsrc_spi::engine::Engine>,
+        engine: std::sync::Arc<dyn goldsrc_spi::engine::EnginePort>,
     ) -> Result<(), HostError> {
         let backend_name = match backend {
             BackendType::Metamod => "Metamod",
@@ -748,7 +749,7 @@ impl HostRuntime {
     }
 
     /// Returns a clone of the Engine reference if initialized.
-    pub fn engine() -> Option<std::sync::Arc<dyn goldsrc_spi::engine::Engine>> {
+    pub fn engine() -> Option<std::sync::Arc<dyn goldsrc_spi::engine::EnginePort>> {
         ENGINE_INSTANCE.get().cloned()
     }
 

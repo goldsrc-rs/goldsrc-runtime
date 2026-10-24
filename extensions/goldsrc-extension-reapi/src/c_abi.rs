@@ -3,7 +3,10 @@
 //! Provides zero-overhead access to extended engine and game DLL interfaces
 //! exposed via Valve's `CreateInterface` mechanism.
 
+#![allow(non_snake_case, non_camel_case_types)]
 use std::ffi::{c_char, c_double, c_float, c_int, c_uchar, c_uint, c_ushort, c_void};
+
+pub use goldsrc_sys::{DLL_FUNCTIONS, cvar_t, edict_t, entvars_t, usercmd_s};
 
 /// ReHLDS Engine API interface version string.
 pub const VREHLDS_HLDS_API_VERSION: &[u8] = b"VREHLDS_HLDS_API_VERSION001\0";
@@ -56,7 +59,7 @@ pub struct RehldsFuncs_t {
     pub GetMsgBadRead: Option<unsafe extern "C" fn() -> *mut c_int>,
     pub GetCmdSource: Option<unsafe extern "C" fn() -> *mut c_int>,
     pub Log: Option<unsafe extern "C" fn(prefix: *const c_char, msg: *const c_char)>,
-    pub GetEntityInterface: Option<unsafe extern "C" fn() -> *mut crate::DLL_FUNCTIONS>,
+    pub GetEntityInterface: Option<unsafe extern "C" fn() -> *mut DLL_FUNCTIONS>,
     pub EV_PlayReliableEvent: Option<
         unsafe extern "C" fn(
             cl: *mut c_void,
@@ -72,7 +75,7 @@ pub struct RehldsFuncs_t {
     pub MSG_WriteBitVec3Coord: Option<unsafe extern "C" fn(fa: *const c_float)>,
     pub MSG_EndBitWriting: Option<unsafe extern "C" fn(buf: *mut c_void)>,
     pub SZ_GetSpace: Option<unsafe extern "C" fn(buf: *mut c_void, length: c_int) -> *mut c_void>,
-    pub GetCvarVars: Option<unsafe extern "C" fn() -> *mut crate::cvar_t>,
+    pub GetCvarVars: Option<unsafe extern "C" fn() -> *mut cvar_t>,
     pub SV_GetChallenge: Option<unsafe extern "C" fn(adr: *const c_void) -> c_int>,
     pub SV_AddResource: Option<
         unsafe extern "C" fn(
@@ -104,7 +107,7 @@ pub struct RehldsFuncs_t {
     pub SV_StartSound: Option<
         unsafe extern "C" fn(
             recipients: c_int,
-            entity: *mut crate::edict_t,
+            entity: *mut edict_t,
             channel: c_int,
             sample: *const c_char,
             volume: c_int,
@@ -115,7 +118,7 @@ pub struct RehldsFuncs_t {
     >,
     pub SV_EmitSound2: Option<
         unsafe extern "C" fn(
-            entity: *mut crate::edict_t,
+            entity: *mut edict_t,
             receiver: *mut c_void,
             channel: c_int,
             sample: *const c_char,
@@ -146,8 +149,7 @@ pub struct RehldsFuncs_t {
     pub MSG_ReadStringLine: Option<unsafe extern "C" fn() -> *mut c_char>,
     pub MSG_ReadAngle: Option<unsafe extern "C" fn() -> c_float>,
     pub MSG_ReadHiresAngle: Option<unsafe extern "C" fn() -> c_float>,
-    pub MSG_ReadUsercmd:
-        Option<unsafe extern "C" fn(to: *mut crate::usercmd_s, from: *mut crate::usercmd_s)>,
+    pub MSG_ReadUsercmd: Option<unsafe extern "C" fn(to: *mut usercmd_s, from: *mut usercmd_s)>,
     pub MSG_ReadCoord: Option<unsafe extern "C" fn() -> c_float>,
     pub MSG_ReadVec3Coord: Option<unsafe extern "C" fn(sb: *mut c_void, fa: *mut c_float)>,
 }
@@ -179,13 +181,13 @@ pub struct IRehldsApi {
 /// ReGameDLL Global Function Table.
 #[repr(C)]
 pub struct ReGameFuncs_t {
-    pub CREATE_NAMED_ENTITY2: Option<unsafe extern "C" fn(iClass: c_uint) -> *mut crate::edict_t>,
+    pub CREATE_NAMED_ENTITY2: Option<unsafe extern "C" fn(iClass: c_uint) -> *mut edict_t>,
     pub ChangeString: Option<unsafe extern "C" fn(dest: *mut *mut c_char, source: *const c_char)>,
     pub RadiusDamage: Option<
         unsafe extern "C" fn(
             vecSrc: [c_float; 3],
-            pevInflictor: *mut crate::entvars_t,
-            pevAttacker: *mut crate::entvars_t,
+            pevInflictor: *mut entvars_t,
+            pevAttacker: *mut entvars_t,
             flDamage: c_float,
             flRadius: c_float,
             iClassIgnore: c_int,
@@ -193,15 +195,11 @@ pub struct ReGameFuncs_t {
         ),
     >,
     pub ClearMultiDamage: Option<unsafe extern "C" fn()>,
-    pub ApplyMultiDamage: Option<
-        unsafe extern "C" fn(
-            pevInflictor: *mut crate::entvars_t,
-            pevAttacker: *mut crate::entvars_t,
-        ),
-    >,
+    pub ApplyMultiDamage:
+        Option<unsafe extern "C" fn(pevInflictor: *mut entvars_t, pevAttacker: *mut entvars_t)>,
     pub AddMultiDamage: Option<
         unsafe extern "C" fn(
-            pevInflictor: *mut crate::entvars_t,
+            pevInflictor: *mut entvars_t,
             pEntity: *mut c_void,
             flDamage: c_float,
             bitsDamageType: c_int,
@@ -214,12 +212,10 @@ pub struct ReGameFuncs_t {
             szValue: *const c_char,
         ) -> *mut c_void,
     >,
-    pub AddEntityHashValue: Option<
-        unsafe extern "C" fn(pev: *mut crate::entvars_t, value: *const c_char, fieldType: c_int),
-    >,
-    pub RemoveEntityHashValue: Option<
-        unsafe extern "C" fn(pev: *mut crate::entvars_t, value: *const c_char, fieldType: c_int),
-    >,
+    pub AddEntityHashValue:
+        Option<unsafe extern "C" fn(pev: *mut entvars_t, value: *const c_char, fieldType: c_int)>,
+    pub RemoveEntityHashValue:
+        Option<unsafe extern "C" fn(pev: *mut entvars_t, value: *const c_char, fieldType: c_int)>,
     pub Cmd_Argc: Option<unsafe extern "C" fn() -> c_int>,
     pub Cmd_Argv: Option<unsafe extern "C" fn(i: c_int) -> *const c_char>,
 }

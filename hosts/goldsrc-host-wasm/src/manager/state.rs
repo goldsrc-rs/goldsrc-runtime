@@ -4,7 +4,7 @@
 //! entity manipulation, cvars, networking messages, HUD, capabilities, and storage sandbox.
 
 use crate::bindings::goldsrc::engine::api;
-use goldsrc_spi::engine::Engine as GoldsrcEngine;
+use goldsrc_spi::engine::EnginePort as GoldsrcEngine;
 use std::sync::Arc;
 
 /// Wasmtime store state exposed to WASM plugins via host functions.
