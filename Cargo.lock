@@ -63,7 +63,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 3.0.5",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -521,7 +521,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc-api"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#d9ca5242b5397850f266ce03a43c39ad200b89cb"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#29bc49e00a04d76654a06e3613a6a92f929cbd43"
 dependencies = [
  "goldsrc-spi",
  "goldsrc-sys",
@@ -751,7 +751,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-spi"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#d9ca5242b5397850f266ce03a43c39ad200b89cb"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#29bc49e00a04d76654a06e3613a6a92f929cbd43"
 dependencies = [
  "serde",
  "stitch-core",
@@ -761,7 +761,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#d9ca5242b5397850f266ce03a43c39ad200b89cb"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#29bc49e00a04d76654a06e3613a6a92f929cbd43"
 dependencies = [
  "bindgen",
 ]
