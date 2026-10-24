@@ -6,7 +6,8 @@ use goldsrc_api::placeholders::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, RwLock};
-use stitch_rs::flow::FlowControl;
+use stitch_rs::define_pipeline;
+pub use stitch_rs::flow::FlowControl;
 
 /// Context passing through the placeholder resolution U-cycle.
 #[repr(C, align(64))]
@@ -40,98 +41,13 @@ pub struct PlaceholderIntent<'a> {
     pub ident: &'a str,
 }
 
-/// Middleware layer for intercepting, caching, or rewriting placeholders.
-pub trait PlaceholderLayer: Send + Sync {
-    /// Descent phase: check cache, rewrite, or short-circuit.
-    fn on_enter(
-        &self,
-        ctx: &mut PlaceholderContext<'_>,
-        intent: &PlaceholderIntent<'_>,
-    ) -> FlowControl<(), (), ()>;
-
-    /// Ascent phase: cache result, audit telemetry.
-    fn on_exit(
-        &self,
-        ctx: &mut PlaceholderContext<'_>,
-        intent: &PlaceholderIntent<'_>,
-        outcome: &mut Result<(), ()>,
-    );
-}
-
-/// Terminal leaf node terminating placeholder U-cycle descent.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PlaceholderTerminal;
-
-impl stitch_rs::middleware::Terminal<PlaceholderContext<'_>, PlaceholderIntent<'_>, (), ()>
-    for PlaceholderTerminal
-{
-    #[inline(always)]
-    fn execute(
-        &mut self,
-        ctx: &mut PlaceholderContext<'_>,
-        _intent: PlaceholderIntent<'_>,
-    ) -> Result<(), ()> {
-        if ctx.resolved.is_some() {
-            Ok(())
-        } else {
-            Err(())
-        }
-    }
-}
-
-/// Dynamic SMA placeholder pipeline runner.
-#[derive(Default, Clone)]
-pub struct PlaceholderPipeline {
-    layers: Vec<Arc<dyn PlaceholderLayer>>,
-}
-
-impl PlaceholderPipeline {
-    pub fn new() -> Self {
-        Self { layers: Vec::new() }
-    }
-
-    pub fn with_layer(mut self, layer: Arc<dyn PlaceholderLayer>) -> Self {
-        self.layers.push(layer);
-        self
-    }
-
-    #[allow(clippy::result_unit_err)]
-    pub fn dispatch(
-        &self,
-        ctx: &mut PlaceholderContext<'_>,
-        intent: &PlaceholderIntent<'_>,
-    ) -> Result<(), ()> {
-        let mut entered_count = 0;
-        let mut halted = false;
-
-        for layer in &self.layers {
-            match layer.on_enter(ctx, intent) {
-                FlowControl::Proceed(()) => {
-                    entered_count += 1;
-                }
-                FlowControl::ShortCircuit(()) => {
-                    entered_count += 1;
-                    break;
-                }
-                FlowControl::Halt(()) => {
-                    halted = true;
-                    break;
-                }
-            }
-        }
-
-        let mut outcome = if halted || ctx.resolved.is_none() {
-            Err(())
-        } else {
-            Ok(())
-        };
-
-        for layer in self.layers.iter().take(entered_count).rev() {
-            layer.on_exit(ctx, intent, &mut outcome);
-        }
-
-        outcome
-    }
+define_pipeline! {
+    name: Placeholder,
+    context: PlaceholderContext<'_>,
+    intent: PlaceholderIntent<'_>,
+    outcome: (),
+    error: (),
+    vis: pub,
 }
 
 static PLACEHOLDER_PIPELINE: LazyLock<RwLock<PlaceholderPipeline>> =

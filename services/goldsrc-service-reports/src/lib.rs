@@ -22,7 +22,8 @@ pub use exporter::{JsonFileExporter, MemoryCollectorExporter, ReportExportError,
 pub use model::{ReportEvent, ReportId, ReportKind, ReportPayload, ReportStatus, ReportSummary};
 
 use std::sync::{Arc, LazyLock, RwLock};
-use stitch_rs::flow::FlowControl;
+use stitch_rs::define_pipeline;
+pub use stitch_rs::flow::FlowControl;
 
 /// 64-byte aligned execution context for report event submissions and flushing under SMA.
 #[repr(C, align(64))]
@@ -58,94 +59,13 @@ pub enum ReportIntent<'a> {
     Flush { id: &'a str },
 }
 
-/// Middleware layer for intercepting, filtering, or auditing report submissions.
-pub trait ReportLayer: Send + Sync {
-    /// Descent phase: inspect payload, filter spam, rate limit.
-    fn on_enter(
-        &self,
-        ctx: &mut ReportSubmissionContext<'_>,
-        intent: &ReportIntent<'_>,
-    ) -> FlowControl<(), (), ()>;
-
-    /// Ascent phase: audit logging, external telemetry fan-out.
-    fn on_exit(
-        &self,
-        ctx: &mut ReportSubmissionContext<'_>,
-        intent: &ReportIntent<'_>,
-        outcome: &mut Result<(), ()>,
-    );
-}
-
-/// Terminal leaf node terminating report submission U-cycle descent.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ReportTerminal;
-
-impl stitch_rs::middleware::Terminal<ReportSubmissionContext<'_>, ReportIntent<'_>, (), ()>
-    for ReportTerminal
-{
-    #[inline(always)]
-    fn execute(
-        &mut self,
-        ctx: &mut ReportSubmissionContext<'_>,
-        _intent: ReportIntent<'_>,
-    ) -> Result<(), ()> {
-        if ctx.is_suppressed { Err(()) } else { Ok(()) }
-    }
-}
-
-/// Dynamic SMA report pipeline orchestrator.
-#[derive(Default, Clone)]
-pub struct ReportPipeline {
-    layers: Vec<Arc<dyn ReportLayer>>,
-}
-
-impl ReportPipeline {
-    pub fn new() -> Self {
-        Self { layers: Vec::new() }
-    }
-
-    pub fn with_layer(mut self, layer: Arc<dyn ReportLayer>) -> Self {
-        self.layers.push(layer);
-        self
-    }
-
-    #[allow(clippy::result_unit_err)]
-    pub fn dispatch(
-        &self,
-        ctx: &mut ReportSubmissionContext<'_>,
-        intent: &ReportIntent<'_>,
-    ) -> Result<(), ()> {
-        let mut entered_count = 0;
-        let mut halted = false;
-
-        for layer in &self.layers {
-            match layer.on_enter(ctx, intent) {
-                FlowControl::Proceed(()) => {
-                    entered_count += 1;
-                }
-                FlowControl::ShortCircuit(()) => {
-                    entered_count += 1;
-                    break;
-                }
-                FlowControl::Halt(()) => {
-                    halted = true;
-                    break;
-                }
-            }
-        }
-
-        let mut outcome = if halted || ctx.is_suppressed {
-            Err(())
-        } else {
-            Ok(())
-        };
-
-        for layer in self.layers.iter().take(entered_count).rev() {
-            layer.on_exit(ctx, intent, &mut outcome);
-        }
-
-        outcome
-    }
+define_pipeline! {
+    name: Report,
+    context: ReportSubmissionContext<'_>,
+    intent: ReportIntent<'_>,
+    outcome: (),
+    error: (),
+    vis: pub,
 }
 
 static REPORT_PIPELINE: LazyLock<RwLock<ReportPipeline>> =
