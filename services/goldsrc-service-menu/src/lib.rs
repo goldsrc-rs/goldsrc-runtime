@@ -1,12 +1,13 @@
 //! Runtime Menu Session Manager, pagination router, and network renderers for GoldSrc.rs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use goldsrc_api::consts::log_targets;
 use goldsrc_api::hud::{HudEffect, HudKind, HudMessage};
 use goldsrc_api::menu::{
-    ExitBehavior, Menu, MenuContext, MenuRendererKind, RenderedMenuPage, SlotAction,
+    ExitBehavior, Menu, MenuContext, MenuPresentationIntent, MenuRendererKind, PreemptionStrategy,
+    RenderedMenuPage, SlotAction,
 };
 use goldsrc_spi::engine::Engine;
 
@@ -160,11 +161,30 @@ pub struct PlayerMenuSession {
     pub expiry_time: Option<f32>,
 }
 
+/// Suspended menu session saved when preemption occurs (frozen-timeout stack).
+#[derive(Clone)]
+pub struct SuspendedMenuSession {
+    pub menu: Arc<Menu>,
+    pub current_page: usize,
+    pub history_stack: Vec<(Arc<Menu>, usize)>,
+    pub remaining_timeout: Option<f32>,
+}
+
+/// Queued menu waiting for an active menu session to conclude.
+#[derive(Clone)]
+pub struct QueuedMenu {
+    pub menu: Menu,
+    pub enqueued_at: f32,
+    pub ttl: Option<f32>,
+}
+
 type PendingParentSession = (Arc<Menu>, usize, Vec<(Arc<Menu>, usize)>);
 
 /// Global session manager handling interactive player menus.
 pub struct MenuSessionManager {
     sessions: HashMap<i32, PlayerMenuSession>,
+    suspended_sessions: HashMap<i32, Vec<SuspendedMenuSession>>,
+    menu_queue: HashMap<i32, VecDeque<QueuedMenu>>,
     pending_parent: HashMap<i32, PendingParentSession>,
     debounce_tracker: HashMap<i32, f32>,
     cooldown_tracker: HashMap<(i32, u32), f32>,
@@ -178,6 +198,8 @@ impl MenuSessionManager {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
+            suspended_sessions: HashMap::new(),
+            menu_queue: HashMap::new(),
             pending_parent: HashMap::new(),
             debounce_tracker: HashMap::new(),
             cooldown_tracker: HashMap::new(),
@@ -204,7 +226,7 @@ impl MenuSessionManager {
         self.action_handler = Some(handler);
     }
 
-    /// Opens a menu for a player, pushing any currently active menu to the history stack.
+    /// Opens a menu for a player using intent-based preemption and conflict resolution.
     pub fn open_menu(
         &mut self,
         player_idx: i32,
@@ -224,29 +246,123 @@ impl MenuSessionManager {
             return;
         }
 
-        // Build history stack if an existing session or pending parent exists
         let pending = self.pending_parent.remove(&player_idx);
 
-        let history = if let Some((parent_menu, parent_page, parent_history)) = pending {
-            let mut stack = parent_history;
-            stack.push((parent_menu, parent_page));
-            stack
-        } else if let Some(existing) = self.sessions.remove(&player_idx) {
-            let mut stack = existing.history_stack;
-            stack.push((existing.menu, existing.current_page));
-            stack
-        } else {
-            Vec::new()
-        };
+        // Check if there is an active session
+        if let Some(active) = self.sessions.remove(&player_idx) {
+            // If opening a submenu with a pending parent, build navigation history stack
+            if let Some((parent_menu, parent_page, mut parent_history)) = pending {
+                parent_history.push((parent_menu, parent_page));
+                self.start_session(player_idx, new_menu, parent_history, engine, current_time);
+                return;
+            }
 
-        let expiry = if new_menu.timeout_seconds > 0 {
-            Some(current_time + new_menu.timeout_seconds as f32)
+            // Conflict resolution based on presentation intent and preemption strategy
+            match new_menu.preemption {
+                PreemptionStrategy::RejectIfBusy => {
+                    // Critical modal gate overrides rejection
+                    if new_menu.presentation == MenuPresentationIntent::ModalGate {
+                        let remaining = active.expiry_time.map(|exp| (exp - current_time).max(0.1));
+                        let suspended = SuspendedMenuSession {
+                            menu: active.menu,
+                            current_page: active.current_page,
+                            history_stack: active.history_stack,
+                            remaining_timeout: remaining,
+                        };
+                        self.suspended_sessions
+                            .entry(player_idx)
+                            .or_default()
+                            .push(suspended);
+                        self.start_session(player_idx, new_menu, Vec::new(), engine, current_time);
+                    } else {
+                        // Keep active session intact
+                        self.sessions.insert(player_idx, active);
+                    }
+                }
+                PreemptionStrategy::Enqueue => {
+                    // Critical modal gate always takes screen immediately
+                    if new_menu.presentation == MenuPresentationIntent::ModalGate {
+                        let remaining = active.expiry_time.map(|exp| (exp - current_time).max(0.1));
+                        let suspended = SuspendedMenuSession {
+                            menu: active.menu,
+                            current_page: active.current_page,
+                            history_stack: active.history_stack,
+                            remaining_timeout: remaining,
+                        };
+                        self.suspended_sessions
+                            .entry(player_idx)
+                            .or_default()
+                            .push(suspended);
+                        self.start_session(player_idx, new_menu, Vec::new(), engine, current_time);
+                    } else {
+                        // Put new menu into pending queue
+                        let ttl = if new_menu.timeout_seconds > 0 {
+                            Some(new_menu.timeout_seconds as f32)
+                        } else {
+                            None
+                        };
+                        self.menu_queue
+                            .entry(player_idx)
+                            .or_default()
+                            .push_back(QueuedMenu {
+                                menu: new_menu,
+                                enqueued_at: current_time,
+                                ttl,
+                            });
+                        self.sessions.insert(player_idx, active);
+                    }
+                }
+                PreemptionStrategy::SuspendAndResume => {
+                    // Freeze remaining timeout of the currently active menu
+                    let remaining = active.expiry_time.map(|exp| (exp - current_time).max(0.1));
+                    let suspended = SuspendedMenuSession {
+                        menu: active.menu,
+                        current_page: active.current_page,
+                        history_stack: active.history_stack,
+                        remaining_timeout: remaining,
+                    };
+                    self.suspended_sessions
+                        .entry(player_idx)
+                        .or_default()
+                        .push(suspended);
+
+                    self.start_session(player_idx, new_menu, Vec::new(), engine, current_time);
+                }
+                PreemptionStrategy::Replace => {
+                    // Full overwrite: clear suspended sessions and history
+                    self.suspended_sessions.remove(&player_idx);
+                    self.start_session(player_idx, new_menu, Vec::new(), engine, current_time);
+                }
+            }
+        } else {
+            // No active menu session: check pending parent or start fresh
+            let history = if let Some((parent_menu, parent_page, mut parent_history)) = pending {
+                parent_history.push((parent_menu, parent_page));
+                parent_history
+            } else {
+                Vec::new()
+            };
+
+            self.start_session(player_idx, new_menu, history, engine, current_time);
+        }
+    }
+
+    fn start_session(
+        &mut self,
+        player_idx: i32,
+        menu: Menu,
+        history: Vec<(Arc<Menu>, usize)>,
+        engine: &dyn Engine,
+        current_time: f32,
+    ) {
+        let expiry = if menu.timeout_seconds > 0 {
+            Some(current_time + menu.timeout_seconds as f32)
         } else {
             None
         };
 
         let mut session = PlayerMenuSession {
-            menu: Arc::new(new_menu),
+            menu: Arc::new(menu),
             current_page: 0,
             history_stack: history,
             rendered_page: None,
@@ -255,6 +371,60 @@ impl MenuSessionManager {
 
         self.render_and_send(player_idx, &mut session, engine, current_time);
         self.sessions.insert(player_idx, session);
+    }
+
+    /// Resumes the next suspended menu or pops the next queued menu for `player_idx`.
+    /// Returns true if a menu was resumed/opened, or false if screen should be cleared.
+    pub fn resume_or_next_menu(
+        &mut self,
+        player_idx: i32,
+        engine: &dyn Engine,
+        current_time: f32,
+    ) -> bool {
+        // 1. Try suspended sessions stack (LIFO)
+        if let Some(stack) = self.suspended_sessions.get_mut(&player_idx)
+            && let Some(suspended) = stack.pop()
+        {
+            if stack.is_empty() {
+                self.suspended_sessions.remove(&player_idx);
+            }
+
+            let expiry = suspended.remaining_timeout.map(|rem| current_time + rem);
+
+            let mut session = PlayerMenuSession {
+                menu: suspended.menu,
+                current_page: suspended.current_page,
+                history_stack: suspended.history_stack,
+                rendered_page: None,
+                expiry_time: expiry,
+            };
+
+            self.render_and_send(player_idx, &mut session, engine, current_time);
+            self.sessions.insert(player_idx, session);
+            return true;
+        }
+
+        // 2. Try pending menu queue (FIFO)
+        if let Some(queue) = self.menu_queue.get_mut(&player_idx) {
+            while let Some(queued) = queue.pop_front() {
+                // Verify TTL
+                if let Some(ttl) = queued.ttl
+                    && (current_time - queued.enqueued_at) > ttl
+                {
+                    continue; // Expired while waiting in queue
+                }
+
+                if queue.is_empty() {
+                    self.menu_queue.remove(&player_idx);
+                }
+
+                self.start_session(player_idx, queued.menu, Vec::new(), engine, current_time);
+                return true;
+            }
+            self.menu_queue.remove(&player_idx);
+        }
+
+        false
     }
 
     /// Dispatches a `menuselect <slot>` command (slot 1..=10).
@@ -363,8 +533,10 @@ impl MenuSessionManager {
                     self.render_and_send(player_idx, &mut session, engine, current_time);
                     self.sessions.insert(player_idx, session);
                 } else {
-                    // Close menu on client
-                    Self::clear_client_menu(player_idx, engine);
+                    // Menu concluded: check if there's a suspended or queued menu to resume
+                    if !self.resume_or_next_menu(player_idx, engine, current_time) {
+                        Self::clear_client_menu(player_idx, engine);
+                    }
                 }
 
                 if let Some(ref handler) = self.action_handler {
@@ -389,7 +561,10 @@ impl MenuSessionManager {
             SlotAction::Exit => {
                 match session.menu.exit_behavior {
                     ExitBehavior::CloseAll => {
-                        Self::clear_client_menu(player_idx, engine);
+                        // CloseAll explicitly terminates this menu hierarchy, but checks suspended sessions
+                        if !self.resume_or_next_menu(player_idx, engine, current_time) {
+                            Self::clear_client_menu(player_idx, engine);
+                        }
                     }
                     ExitBehavior::PopParent => {
                         if let Some((parent_menu, parent_page)) = session.history_stack.pop() {
@@ -402,7 +577,7 @@ impl MenuSessionManager {
                             };
                             self.render_and_send(player_idx, &mut session, engine, current_time);
                             self.sessions.insert(player_idx, session);
-                        } else {
+                        } else if !self.resume_or_next_menu(player_idx, engine, current_time) {
                             Self::clear_client_menu(player_idx, engine);
                         }
                     }
@@ -445,7 +620,7 @@ impl MenuSessionManager {
                             };
                             self.render_and_send(player_idx, &mut session, engine, current_time);
                             self.sessions.insert(player_idx, session);
-                        } else {
+                        } else if !self.resume_or_next_menu(player_idx, engine, current_time) {
                             Self::clear_client_menu(player_idx, engine);
                         }
                     }
@@ -530,23 +705,28 @@ impl MenuSessionManager {
     }
 
     /// Clears the active menu for a player.
-    pub fn close_menu(&mut self, player_idx: i32, engine: &dyn Engine) {
-        if self.sessions.remove(&player_idx).is_some() {
+    pub fn close_menu(&mut self, player_idx: i32, engine: &dyn Engine, current_time: f32) {
+        self.sessions.remove(&player_idx);
+        if !self.resume_or_next_menu(player_idx, engine, current_time) {
             Self::clear_client_menu(player_idx, engine);
         }
     }
 
-    /// Cleans up session, pending parents, debounces, and cooldowns when player disconnects.
+    /// Cleans up session, suspended stacks, queues, pending parents, debounces, and cooldowns when player disconnects.
     pub fn on_disconnect(&mut self, player_idx: i32) {
         self.sessions.remove(&player_idx);
+        self.suspended_sessions.remove(&player_idx);
+        self.menu_queue.remove(&player_idx);
         self.pending_parent.remove(&player_idx);
         self.debounce_tracker.remove(&player_idx);
         self.cooldown_tracker.retain(|&(p, _), _| p != player_idx);
     }
 
-    /// Clears all sessions, pending parents, and trackers on map change or server shutdown.
+    /// Clears all sessions, suspended stacks, queues, pending parents, and trackers on map change or server shutdown.
     pub fn on_map_change(&mut self) {
         self.sessions.clear();
+        self.suspended_sessions.clear();
+        self.menu_queue.clear();
         self.pending_parent.clear();
         self.debounce_tracker.clear();
         self.cooldown_tracker.clear();
@@ -613,7 +793,9 @@ impl MenuSessionManager {
 
         for player_idx in expired {
             self.sessions.remove(&player_idx);
-            Self::clear_client_menu(player_idx, engine);
+            if !self.resume_or_next_menu(player_idx, engine, current_time) {
+                Self::clear_client_menu(player_idx, engine);
+            }
         }
     }
 
@@ -1169,5 +1351,108 @@ mod tests {
 
         // Slot 2 proceeds and succeeds
         assert!(mgr.handle_menuselect(player, 2, &engine, 51.0));
+    }
+
+    #[test]
+    fn test_menu_preemption_suspend_and_resume_with_frozen_timeout() {
+        let mut mgr = MenuSessionManager::new();
+        let engine = MockEngine;
+        let player = 7;
+
+        // 1. Open Base Menu with 10s timeout at t=10.0 (expiry = 20.0)
+        let base_menu = Menu::builder("Base Menu")
+            .item(("Base Option", 1))
+            .timeout(10)
+            .build();
+        mgr.open_menu(player, base_menu, &engine, 10.0);
+        assert_eq!(mgr.sessions.get(&player).unwrap().menu.title, "Base Menu");
+
+        // 2. At t=14.0 (6.0s remaining), an urgent Vote Menu appears with SuspendAndResume
+        let vote_menu = Menu::builder("Vote Menu")
+            .item(("Vote Yes", 10))
+            .timeout(5)
+            .preemption(PreemptionStrategy::SuspendAndResume)
+            .build();
+        mgr.open_menu(player, vote_menu, &engine, 14.0);
+
+        // Vote Menu is active, Base Menu is in suspended_sessions
+        assert_eq!(mgr.sessions.get(&player).unwrap().menu.title, "Vote Menu");
+        assert_eq!(mgr.suspended_sessions.get(&player).unwrap().len(), 1);
+        let suspended = &mgr.suspended_sessions.get(&player).unwrap()[0];
+        assert_eq!(suspended.menu.title, "Base Menu");
+        assert!((suspended.remaining_timeout.unwrap() - 6.0).abs() < 0.01);
+
+        // 3. At t=16.0, player votes Yes (Vote menu closes)
+        let handled = mgr.handle_menuselect(player, 1, &engine, 16.0);
+        assert!(handled);
+
+        // Base Menu must be automatically resumed with expiry rescheduled to 16.0 + 6.0 = 22.0!
+        let active = mgr.sessions.get(&player).expect("Base menu should resume");
+        assert_eq!(active.menu.title, "Base Menu");
+        assert!((active.expiry_time.unwrap() - 22.0).abs() < 0.01);
+        assert!(!mgr.suspended_sessions.contains_key(&player));
+    }
+
+    #[test]
+    fn test_menu_preemption_enqueue_fifo() {
+        let mut mgr = MenuSessionManager::new();
+        let engine = MockEngine;
+        let player = 8;
+
+        // 1. Open User Interactive menu
+        let active_menu = Menu::builder("Active Menu").item(("Shop Item", 1)).build();
+        mgr.open_menu(player, active_menu, &engine, 0.0);
+
+        // 2. Offer appears with Enqueue strategy
+        let queued_menu = Menu::builder("Queued Survey")
+            .item(("Answer 1", 2))
+            .preemption(PreemptionStrategy::Enqueue)
+            .build();
+        mgr.open_menu(player, queued_menu, &engine, 1.0);
+
+        // Active menu remains on screen, Queued menu is in FIFO
+        assert_eq!(mgr.sessions.get(&player).unwrap().menu.title, "Active Menu");
+        assert_eq!(mgr.menu_queue.get(&player).unwrap().len(), 1);
+
+        // 3. Player finishes Active Menu (slot 1)
+        mgr.handle_menuselect(player, 1, &engine, 2.0);
+
+        // Queued survey is automatically presented!
+        assert_eq!(
+            mgr.sessions.get(&player).unwrap().menu.title,
+            "Queued Survey"
+        );
+        assert!(!mgr.menu_queue.contains_key(&player));
+    }
+
+    #[test]
+    fn test_menu_preemption_reject_if_busy_unless_modal_gate() {
+        let mut mgr = MenuSessionManager::new();
+        let engine = MockEngine;
+        let player = 9;
+
+        let active_menu = Menu::builder("Active Menu").item(("Select", 1)).build();
+        mgr.open_menu(player, active_menu, &engine, 0.0);
+
+        // Normal offer with RejectIfBusy -> rejected!
+        let offer = Menu::builder("Rejected Offer")
+            .item(("Offer", 2))
+            .preemption(PreemptionStrategy::RejectIfBusy)
+            .build();
+        mgr.open_menu(player, offer, &engine, 1.0);
+        assert_eq!(mgr.sessions.get(&player).unwrap().menu.title, "Active Menu");
+
+        // ModalGate with RejectIfBusy -> forces preemption with suspend!
+        let modal = Menu::builder("Critical Modal Gate")
+            .item(("Accept Rules", 3))
+            .presentation(MenuPresentationIntent::ModalGate)
+            .preemption(PreemptionStrategy::RejectIfBusy)
+            .build();
+        mgr.open_menu(player, modal, &engine, 2.0);
+        assert_eq!(
+            mgr.sessions.get(&player).unwrap().menu.title,
+            "Critical Modal Gate"
+        );
+        assert_eq!(mgr.suspended_sessions.get(&player).unwrap().len(), 1);
     }
 }
