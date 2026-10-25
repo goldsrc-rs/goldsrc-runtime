@@ -15,6 +15,11 @@ goldsrc-sys = { workspace = true }
 goldsrc-api = { workspace = true }
 goldsrc-spi = { workspace = true }
 goldsrc-core = { workspace = true }
-goldsrc-extension-reapi = { workspace = true }
+goldsrc-extension-reapi = { workspace = true, optional = true }
 libloading = { workspace = true }
 stitch-rs = { workspace = true }
+
+[features]
+default = []
+legacy-reapi = ["dep:goldsrc-extension-reapi"]
+

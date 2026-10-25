@@ -81,14 +81,24 @@ pub fn ensure_loaded() -> bool {
     }
 }
 
+#[inline(always)]
+fn is_valid_edict(edict: *const goldsrc_sys::edict_t) -> bool {
+    !edict.is_null()
+}
+
 /// Forward GiveFnptrsToDll to the real game DLL.
 ///
 /// # Safety
-/// `engfuncs` and `globals` must be valid engine pointers.
+/// `engfuncs` and `globals` must be valid, non-null engine pointers.
 pub unsafe fn forward_give_fnptrs_to_dll(engfuncs: *mut enginefuncs_t, globals: *mut globalvars_t) {
+    if engfuncs.is_null() || globals.is_null() {
+        log::error!(target: log_targets::PROXY, "Cannot forward GiveFnptrsToDll: engfuncs or globals is null");
+        return;
+    }
     ensure_loaded();
     if let Some(proxy_lock) = PROXY.get() {
         let guard = proxy_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: guard._lib is a loaded GameDLL library and "GiveFnptrsToDll\0" is a standard HLSDK export.
         let give_fns: Result<
             libloading::Symbol<unsafe extern "system" fn(*mut enginefuncs_t, *mut globalvars_t)>,
             _,
@@ -96,6 +106,7 @@ pub unsafe fn forward_give_fnptrs_to_dll(engfuncs: *mut enginefuncs_t, globals: 
         match give_fns {
             Ok(f) => {
                 log::trace!(target: log_targets::PROXY, "Forwarding GiveFnptrsToDll to real GameDLL...");
+                // SAFETY: engfuncs and globals were checked for null above.
                 unsafe { f(engfuncs, globals) };
                 log::trace!(target: log_targets::PROXY, "Real GameDLL GiveFnptrsToDll returned successfully");
             }
@@ -271,14 +282,17 @@ unsafe fn try_load_game_dll(path: &PathBuf) -> Result<GameDllProxy, Box<dyn std:
             false
         };
 
-        // Query ReGameDLL CreateInterface factory if exported
-        let create_iface: Result<
-            libloading::Symbol<goldsrc_extension_reapi::c_abi::CreateInterfaceFn>,
-            _,
-        > = lib.get(b"CreateInterface\0");
-        if let Ok(factory) = create_iface {
-            goldsrc_extension_reapi::ReApiBridge::try_init_regamedll_factory(*factory);
-            goldsrc_extension_reapi::register_extensions();
+        #[cfg(feature = "legacy-reapi")]
+        {
+            // Query ReGameDLL CreateInterface factory if exported
+            let create_iface: Result<
+                libloading::Symbol<goldsrc_extension_reapi::c_abi::CreateInterfaceFn>,
+                _,
+            > = lib.get(b"CreateInterface\0");
+            if let Ok(factory) = create_iface {
+                goldsrc_extension_reapi::ReApiBridge::try_init_regamedll_factory(*factory);
+                goldsrc_extension_reapi::register_extensions();
+            }
         }
 
         Ok(GameDllProxy {
@@ -339,11 +353,15 @@ pub fn forward_server_activate(
     edict_count: i32,
     client_max: i32,
 ) {
+    if edict_list.is_null() || edict_count <= 0 || client_max < 0 {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnServerActivate
     });
     if let Some(f) = func {
+        // SAFETY: edict_list is non-null and edict_count is positive. f is a valid GameDLL function pointer.
         unsafe { f(edict_list, edict_count, client_max) };
     }
 }
@@ -355,17 +373,22 @@ pub fn forward_server_deactivate() {
         guard.dll_funcs.pfnServerDeactivate
     });
     if let Some(f) = func {
+        // SAFETY: f is a valid GameDLL function pointer taking no arguments.
         unsafe { f() };
     }
 }
 
 /// Forward a spawn call to the real game DLL if loaded.
 pub fn forward_spawn(edict: *mut goldsrc_sys::edict_t) -> i32 {
+    if !is_valid_edict(edict) {
+        return 0;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSpawn
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) }
     } else {
         0
@@ -417,11 +440,15 @@ pub fn forward_client_connect(
     address: *const std::os::raw::c_char,
     reject_reason: *mut std::os::raw::c_char,
 ) -> goldsrc_sys::qboolean {
+    if !is_valid_edict(edict) || name.is_null() || address.is_null() || reject_reason.is_null() {
+        return 0 as goldsrc_sys::qboolean;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnClientConnect
     });
     if let Some(f) = func {
+        // SAFETY: All pointer arguments are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict, name, address, reject_reason) }
     } else {
         1 as goldsrc_sys::qboolean // Allow by default if no real DLL
@@ -430,22 +457,30 @@ pub fn forward_client_connect(
 
 /// Forward a client disconnect call to the real game DLL if loaded.
 pub fn forward_client_disconnect(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnClientDisconnect
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
 
 /// Forward a client command call to the real game DLL if loaded.
 pub fn forward_client_command(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnClientCommand
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
@@ -457,6 +492,7 @@ pub fn forward_game_init() {
         guard.dll_funcs.pfnGameInit
     });
     if let Some(f) = func {
+        // SAFETY: f is a valid GameDLL function pointer taking no arguments.
         unsafe { f() };
     }
 }
@@ -468,28 +504,37 @@ pub fn forward_start_frame() {
         guard.dll_funcs.pfnStartFrame
     });
     if let Some(f) = func {
+        // SAFETY: f is a valid GameDLL function pointer taking no arguments.
         unsafe { f() };
     }
 }
 
 /// Forward a player pre think call to the real game DLL if loaded.
 pub fn forward_player_pre_think(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnPlayerPreThink
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
 
 /// Forward a player post think call to the real game DLL if loaded.
 pub fn forward_player_post_think(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnPlayerPostThink
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
@@ -500,22 +545,30 @@ pub fn forward_cmd_start(
     cmd: *const goldsrc_sys::usercmd_s,
     random_seed: std::os::raw::c_uint,
 ) {
+    if !is_valid_edict(player) || cmd.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnCmdStart
     });
     if let Some(f) = func {
+        // SAFETY: player and cmd are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(player, cmd, random_seed) };
     }
 }
 
 /// Forward a cmd end call to the real game DLL if loaded.
 pub fn forward_cmd_end(player: *const goldsrc_sys::edict_t) {
+    if !is_valid_edict(player) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnCmdEnd
     });
     if let Some(f) = func {
+        // SAFETY: player is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(player) };
     }
 }
@@ -530,11 +583,15 @@ pub fn forward_add_to_full_pack(
     player: std::os::raw::c_int,
     pset: *mut u8,
 ) -> std::os::raw::c_int {
+    if state.is_null() || !is_valid_edict(ent) || !is_valid_edict(host) {
+        return -1;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnAddToFullPack
     });
     if let Some(f) = func {
+        // SAFETY: state, ent and host are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(state, e, ent, host, hostflags, player, pset) }
     } else {
         -1
@@ -543,11 +600,15 @@ pub fn forward_add_to_full_pack(
 
 /// Forward a client kill call to the real game DLL if loaded.
 pub fn forward_client_kill(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnClientKill
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
@@ -557,33 +618,45 @@ pub fn forward_touch(
     pent_touched: *mut goldsrc_sys::edict_t,
     pent_other: *mut goldsrc_sys::edict_t,
 ) {
+    if !is_valid_edict(pent_touched) || !is_valid_edict(pent_other) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnTouch
     });
     if let Some(f) = func {
+        // SAFETY: Both edicts are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(pent_touched, pent_other) };
     }
 }
 
 /// Forward a use call to the real game DLL if loaded.
 pub fn forward_use(pent_used: *mut goldsrc_sys::edict_t, pent_other: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(pent_used) || !is_valid_edict(pent_other) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnUse
     });
     if let Some(f) = func {
+        // SAFETY: Both edicts are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(pent_used, pent_other) };
     }
 }
 
 /// Forward a client put in server call to the real game DLL if loaded.
 pub fn forward_client_put_in_server(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnClientPutInServer
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
@@ -593,22 +666,30 @@ pub fn forward_client_user_info_changed(
     edict: *mut goldsrc_sys::edict_t,
     infobuffer: *mut std::ffi::c_char,
 ) {
+    if !is_valid_edict(edict) || infobuffer.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnClientUserInfoChanged
     });
     if let Some(f) = func {
+        // SAFETY: edict and infobuffer are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict, infobuffer) };
     }
 }
 
 /// Forward a think call to the real game DLL if loaded.
 pub fn forward_think(pent: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(pent) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnThink
     });
     if let Some(f) = func {
+        // SAFETY: pent is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(pent) };
     }
 }
@@ -618,33 +699,45 @@ pub fn forward_blocked(
     pent_blocked: *mut goldsrc_sys::edict_t,
     pent_other: *mut goldsrc_sys::edict_t,
 ) {
+    if !is_valid_edict(pent_blocked) || !is_valid_edict(pent_other) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnBlocked
     });
     if let Some(f) = func {
+        // SAFETY: Both edicts are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(pent_blocked, pent_other) };
     }
 }
 
 /// Forward a key value call to the real game DLL if loaded.
 pub fn forward_key_value(pent: *mut goldsrc_sys::edict_t, pkvd: *mut goldsrc_sys::KeyValueData) {
+    if !is_valid_edict(pent) || pkvd.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnKeyValue
     });
     if let Some(f) = func {
+        // SAFETY: pent and pkvd are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(pent, pkvd) };
     }
 }
 
 /// Forward a set abs box call to the real game DLL if loaded.
 pub fn forward_set_abs_box(pent: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(pent) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSetAbsBox
     });
     if let Some(f) = func {
+        // SAFETY: pent is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(pent) };
     }
 }
@@ -655,66 +748,90 @@ pub fn forward_update_client_data(
     sendweapons: std::os::raw::c_int,
     cd: *mut goldsrc_sys::clientdata_s,
 ) {
+    if !is_valid_edict(ent) || cd.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnUpdateClientData
     });
     if let Some(f) = func {
+        // SAFETY: ent and cd are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(ent, sendweapons, cd) };
     }
 }
 
 /// Forward a spectator connect call to the real game DLL if loaded.
 pub fn forward_spectator_connect(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSpectatorConnect
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
 
 /// Forward a spectator disconnect call to the real game DLL if loaded.
 pub fn forward_spectator_disconnect(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSpectatorDisconnect
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
 
 /// Forward a spectator think call to the real game DLL if loaded.
 pub fn forward_spectator_think(edict: *mut goldsrc_sys::edict_t) {
+    if !is_valid_edict(edict) {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSpectatorThink
     });
     if let Some(f) = func {
+        // SAFETY: edict is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(edict) };
     }
 }
 
 /// Forward a sys error call to the real game DLL if loaded.
 pub fn forward_sys_error(error_string: *const std::ffi::c_char) {
+    if error_string.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSys_Error
     });
     if let Some(f) = func {
+        // SAFETY: error_string is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(error_string) };
     }
 }
 
 /// Forward a pm move call to the real game DLL if loaded.
 pub fn forward_pm_move(ppmove: *mut goldsrc_sys::playermove_s, server: goldsrc_sys::qboolean) {
+    if ppmove.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnPM_Move
     });
     if let Some(f) = func {
+        // SAFETY: ppmove is verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(ppmove, server) };
     }
 }
@@ -726,11 +843,15 @@ pub fn forward_setup_visibility(
     pvs: *mut *mut u8,
     pas: *mut *mut u8,
 ) {
+    if !is_valid_edict(view_entity) || !is_valid_edict(client) || pvs.is_null() || pas.is_null() {
+        return;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnSetupVisibility
     });
     if let Some(f) = func {
+        // SAFETY: All pointers are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(view_entity, client, pvs, pas) };
     }
 }
@@ -741,11 +862,15 @@ pub fn forward_inconsistent_file(
     filename: *const std::ffi::c_char,
     disconnect_message: *mut std::ffi::c_char,
 ) -> std::os::raw::c_int {
+    if !is_valid_edict(player) || filename.is_null() {
+        return 0;
+    }
     let func = PROXY.get().and_then(|lock| {
         let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         guard.dll_funcs.pfnInconsistentFile
     });
     if let Some(f) = func {
+        // SAFETY: player and filename are verified non-null. f is a valid GameDLL function pointer.
         unsafe { f(player, filename, disconnect_message) }
     } else {
         0
@@ -759,6 +884,7 @@ pub fn forward_allow_lag_compensation() -> std::os::raw::c_int {
         guard.dll_funcs.pfnAllowLagCompensation
     });
     if let Some(f) = func {
+        // SAFETY: f is a valid GameDLL function pointer taking no arguments.
         unsafe { f() }
     } else {
         1
@@ -776,9 +902,17 @@ pub unsafe fn forward_server_get_blending_interface(
     rotationmatrix: *mut std::ffi::c_void,
     bonetransform: *mut std::ffi::c_void,
 ) -> i32 {
+    if ppinterface.is_null()
+        || pstudio.is_null()
+        || rotationmatrix.is_null()
+        || bonetransform.is_null()
+    {
+        return 0;
+    }
     ensure_loaded();
     let func = PROXY.get().and_then(|proxy_lock| {
         let guard = proxy_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: guard._lib is a loaded GameDLL library.
         let func: Result<
             libloading::Symbol<
                 unsafe extern "C" fn(
@@ -794,6 +928,7 @@ pub unsafe fn forward_server_get_blending_interface(
         func.ok().map(|sym| *sym)
     });
     if let Some(f) = func {
+        // SAFETY: Pointers are verified non-null. f is a valid function pointer from GameDLL.
         unsafe { f(version, ppinterface, pstudio, rotationmatrix, bonetransform) }
     } else {
         0
@@ -805,16 +940,21 @@ pub unsafe fn forward_server_get_blending_interface(
 /// # Safety
 /// `pev` is a valid pointer to an `entvars_t` allocated by the engine.
 pub unsafe fn forward_entity(name: &str, pev: *mut goldsrc_sys::entvars_t) {
+    if pev.is_null() {
+        return;
+    }
     ensure_loaded();
     let func = PROXY.get().and_then(|proxy_lock| {
         let guard = proxy_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut name_bytes = name.as_bytes().to_vec();
         name_bytes.push(0);
+        // SAFETY: guard._lib is loaded; name_bytes is a null-terminated C-string.
         let func: Result<libloading::Symbol<unsafe extern "C" fn(*mut goldsrc_sys::entvars_t)>, _> =
             unsafe { guard._lib.get(&name_bytes[..]) };
         func.ok().map(|sym| *sym)
     });
     if let Some(f) = func {
+        // SAFETY: pev is verified non-null. f is a valid function pointer from GameDLL.
         unsafe { f(pev) };
     }
 }
@@ -827,9 +967,13 @@ pub unsafe fn forward_create_interface(
     name: *const std::os::raw::c_char,
     return_code: *mut i32,
 ) -> *mut std::ffi::c_void {
+    if name.is_null() {
+        return std::ptr::null_mut();
+    }
     ensure_loaded();
     let func = PROXY.get().and_then(|proxy_lock| {
         let guard = proxy_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: guard._lib is a loaded GameDLL library.
         let func: Result<
             libloading::Symbol<
                 unsafe extern "C" fn(
@@ -842,6 +986,7 @@ pub unsafe fn forward_create_interface(
         func.ok().map(|sym| *sym)
     });
     if let Some(f) = func {
+        // SAFETY: name is verified non-null. f is a valid function pointer from GameDLL.
         unsafe { f(name, return_code) }
     } else {
         std::ptr::null_mut()

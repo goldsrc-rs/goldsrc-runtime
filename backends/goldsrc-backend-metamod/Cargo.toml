@@ -15,9 +15,14 @@ goldsrc-sys = { workspace = true }
 goldsrc-api = { workspace = true }
 goldsrc-spi = { workspace = true }
 goldsrc-core = { workspace = true }
-goldsrc-extension-reapi = { workspace = true }
+goldsrc-extension-reapi = { workspace = true, optional = true }
 goldsrc-extension-metamod = { workspace = true }
 stitch-rs = { workspace = true }
+
+[features]
+default = []
+legacy-reapi = ["dep:goldsrc-extension-reapi"]
+
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
