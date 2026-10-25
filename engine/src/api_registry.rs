@@ -276,6 +276,7 @@ pub unsafe fn edict_index(edict: *mut edict_t) -> i32 {
     if let Some(funcs) = engfuncs()
         && let Some(index_fn) = funcs.pfnIndexOfEdict
     {
+        // SAFETY: `edict` is checked against valid ranges and `index_fn` is engine-provided.
         return unsafe { index_fn(edict) };
     }
 

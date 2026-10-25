@@ -60,6 +60,13 @@ pub enum ReportEvent {
         duration_secs: f32,
         reason: String,
     },
+    /// Player connect event.
+    Connect {
+        player: i32,
+        auth: String,
+        ip: String,
+        timestamp_ms: u64,
+    },
     /// Player disconnect and playtime tracking.
     Disconnect {
         player: i32,

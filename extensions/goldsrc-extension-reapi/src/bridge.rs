@@ -52,6 +52,7 @@ pub struct ReApiBridge;
 impl ReApiBridge {
     /// Attempts to initialize ReHLDS from an engine `CreateInterface` factory pointer.
     pub fn try_init_rehlds_factory(factory: CreateInterfaceFn) -> bool {
+        // SAFETY: `factory` is an engine CreateInterface export adhering to standard Valve interface factory conventions.
         unsafe {
             let mut ret_code: c_int = 0;
             let iface_ptr = factory(
@@ -101,6 +102,7 @@ impl ReApiBridge {
 
     /// Attempts to initialize ReGameDLL from a GameDLL `CreateInterface` factory pointer.
     pub fn try_init_regamedll_factory(factory: CreateInterfaceFn) -> bool {
+        // SAFETY: `factory` is a GameDLL CreateInterface export adhering to standard Valve interface factory conventions.
         unsafe {
             let mut ret_code: c_int = 0;
             let iface_ptr = factory(
@@ -164,6 +166,7 @@ impl ReApiBridge {
     pub fn get_build_number() -> Option<i32> {
         let state = REAPI_STATE.read().ok()?;
         let funcs_ptr = state.rehlds_funcs?;
+        // SAFETY: `funcs_ptr` was validated during ReHLDS initialization and points to the static engine export table.
         unsafe {
             let funcs = &*funcs_ptr;
             funcs.GetBuildNumber.map(|f| f())
@@ -174,6 +177,7 @@ impl ReApiBridge {
     pub fn get_real_time() -> Option<f64> {
         let state = REAPI_STATE.read().ok()?;
         let funcs_ptr = state.rehlds_funcs?;
+        // SAFETY: `funcs_ptr` was validated during ReHLDS initialization and points to the static engine export table.
         unsafe {
             let funcs = &*funcs_ptr;
             funcs.GetRealTime.map(|f| f())
@@ -187,6 +191,7 @@ impl ReApiBridge {
             // Try detecting ReHLDS from loaded engine module
             if !Self::status().rehlds_active {
                 for mod_name in &[c"swds.dll", c"hw.dll"] {
+                    // SAFETY: Querying module handles and standard CreateInterface symbol via Win32 loader.
                     unsafe {
                         use windows_sys::Win32::System::LibraryLoader::{
                             GetModuleHandleA, GetProcAddress,
@@ -208,6 +213,7 @@ impl ReApiBridge {
             // Try detecting ReGameDLL from loaded game DLL module
             if !Self::status().regamedll_active {
                 for mod_name in &[c"mp.dll", c"cs.dll"] {
+                    // SAFETY: Querying GameDLL module handles and standard CreateInterface symbol via Win32 loader.
                     unsafe {
                         use windows_sys::Win32::System::LibraryLoader::{
                             GetModuleHandleA, GetProcAddress,

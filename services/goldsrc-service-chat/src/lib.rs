@@ -82,6 +82,16 @@ impl<L: ChatLayer, Next: MonomorphicChatNode> MonomorphicChatNode for (L, Next) 
     }
 }
 
+/// Runs a compile-time monomorphic U-cycle pipeline over [`ChatMessage`].
+#[inline(always)]
+#[allow(clippy::result_unit_err)]
+pub fn run_monomorphic_chat_pipeline<N: MonomorphicChatNode>(
+    node: &N,
+    msg: &mut ChatMessage,
+) -> Result<(), ()> {
+    node.cycle(msg)
+}
+
 /// Global dynamic chat processing pipeline registry.
 static CHAT_PIPELINE: LazyLock<RwLock<Vec<Arc<dyn ChatLayer>>>> =
     LazyLock::new(|| RwLock::new(Vec::new()));
@@ -305,17 +315,28 @@ pub fn dispatch_local_chat_middleware(
         ChatScope::all()
     };
     let mut msg = ChatMessage::new(sender, text, scope);
-    let layers = match CHAT_PIPELINE.read() {
-        Ok(p) => p,
-        Err(e) => e.into_inner(),
+    let blocked = {
+        let guard = match CHAT_PIPELINE.read() {
+            Ok(p) => p,
+            Err(e) => e.into_inner(),
+        };
+        if guard.is_empty() {
+            false
+        } else {
+            run_chat_layers(&guard, &mut msg).is_err()
+        }
     };
 
-    if run_chat_layers(&layers, &mut msg).is_err() {
+    if blocked {
         return None;
     }
 
-    if let Some(ref prefix) = msg.prefix {
-        Some(format!("{prefix}__PREFIX_SPLIT__{}", msg.formatted_text))
+    if let Some(prefix) = msg.prefix {
+        let mut out = String::with_capacity(prefix.len() + 16 + msg.formatted_text.len());
+        out.push_str(&prefix);
+        out.push_str("__PREFIX_SPLIT__");
+        out.push_str(&msg.formatted_text);
+        Some(out)
     } else {
         Some(msg.formatted_text)
     }
@@ -346,12 +367,19 @@ pub fn process_chat_message_with_context(
     }
 
     // 1. Run SMA U-Cycle pipeline over registered layers (censorship, ranks, mute, custom prefixes)
-    let layers = match CHAT_PIPELINE.read() {
-        Ok(p) => p.clone(),
-        Err(e) => e.into_inner().clone(),
+    let blocked = {
+        let guard = match CHAT_PIPELINE.read() {
+            Ok(p) => p,
+            Err(e) => e.into_inner(),
+        };
+        if guard.is_empty() {
+            false
+        } else {
+            run_chat_layers(&guard, &mut msg).is_err()
+        }
     };
 
-    if run_chat_layers(&layers, &mut msg).is_err() {
+    if blocked {
         return true; // blocked by middleware
     }
 

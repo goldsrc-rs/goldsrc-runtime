@@ -504,9 +504,18 @@ impl WatcherService {
         }
     }
 
+    /// Returns `true` if there are pending debounced filesystem events in the queue.
+    #[inline(always)]
+    pub fn has_pending_events(&self) -> bool {
+        !self.event_rx.is_empty()
+    }
+
     /// Drains all debounced filesystem events from the channel that occurred since last call.
     /// Drops duplicate events within the configured debounce window per watcher/path.
     pub fn drain_events(&mut self) -> Vec<WatcherEvent> {
+        if self.event_rx.is_empty() {
+            return Vec::new();
+        }
         let mut ready = Vec::new();
         let now = Instant::now();
 

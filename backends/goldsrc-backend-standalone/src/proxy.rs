@@ -83,7 +83,12 @@ pub fn ensure_loaded() -> bool {
 
 #[inline(always)]
 fn is_valid_edict(edict: *const goldsrc_sys::edict_t) -> bool {
-    !edict.is_null()
+    if edict.is_null() {
+        return false;
+    }
+    let addr = edict as usize;
+    // Reject lower 64KB null/guard page addresses and verify memory alignment
+    addr >= 0x10000 && addr.is_multiple_of(std::mem::align_of::<goldsrc_sys::edict_t>())
 }
 
 /// Forward GiveFnptrsToDll to the real game DLL.

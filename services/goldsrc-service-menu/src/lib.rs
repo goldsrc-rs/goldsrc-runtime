@@ -157,9 +157,12 @@ impl MenuPipeline {
     }
 
     /// Dispatches an incoming [`MenuSelectContext`] through the pipeline's U-cycle.
-    #[inline]
+    #[inline(always)]
     #[allow(clippy::result_unit_err)]
     pub fn dispatch(&self, ctx: &mut MenuSelectContext) -> Result<(), ()> {
+        if self.layers.is_empty() {
+            return Ok(());
+        }
         run_menu_layers(&self.layers, ctx)
     }
 }
@@ -470,13 +473,20 @@ impl MenuSessionManager {
         };
 
         // 0. Execute SMA MenuPipeline U-cycle
-        let mut select_ctx =
-            MenuSelectContext::new(player_idx, slot, current_time, Some(action.clone()));
+        let mut select_ctx = MenuSelectContext::new(player_idx, slot, current_time, Some(action));
         if self.pipeline.dispatch(&mut select_ctx).is_err() {
             // Suppressed by middleware layer, re-insert session
             self.sessions.insert(player_idx, session);
             return false;
         }
+
+        let action = match select_ctx.action {
+            Some(act) => act,
+            None => {
+                self.sessions.insert(player_idx, session);
+                return false;
+            }
+        };
 
         // 1. Menu global debounce anti-flood check
         if let Some(debounce_dur) = session.menu.debounce {
