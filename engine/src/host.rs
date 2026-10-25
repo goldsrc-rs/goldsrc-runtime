@@ -430,10 +430,13 @@ impl HostRuntime {
         let logs_dir = crate::paths::PathResolver::existing_log_dir(backend);
         crate::logging::init_with_dir(
             sys_config.logging.clone(),
-            Some(logs_dir),
+            Some(logs_dir.clone()),
             backend,
             Some(print_cb),
         );
+
+        // Initialize structured reports service
+        crate::reports::init_reports(logs_dir);
 
         // Initial startup banner stating active backend and version
         log::info!(
@@ -915,6 +918,7 @@ impl HostRuntime {
                 }
                 if let Some(engine) = Self::engine() {
                     let map_name = engine.cvar_get_string("mapname").unwrap_or_default();
+                    crate::reports::start_map_session(&map_name);
                     let player_count = goldsrc_api::auth::Auth::total_players();
                     Self::evaluate_rules_scoped(
                         goldsrc_api::rules::RuleScope::MapChange,
@@ -924,6 +928,7 @@ impl HostRuntime {
                 }
             }
             HostEvent::ServerDeactivate => {
+                crate::reports::finalize_map_session();
                 goldsrc_api::bump_map_generation();
                 goldsrc_api::auth::Auth::clear_all_players();
                 goldsrc_host_wasm::clear_all_active_menu_owners();
@@ -933,7 +938,9 @@ impl HostRuntime {
                 Self::handle_map_change();
             }
             HostEvent::MapChange { map_name } => {
+                crate::reports::finalize_map_session();
                 if !map_name.is_empty() {
+                    crate::reports::start_map_session(map_name);
                     Self::set_current_map(map_name);
                 }
                 Self::handle_map_change();
@@ -963,6 +970,14 @@ impl HostRuntime {
                     }
                 }
                 PlayerEvent::Disconnect => {
+                    crate::reports::record_event(
+                        goldsrc_service_reports::ReportEvent::Disconnect {
+                            player: slot,
+                            auth: String::new(),
+                            duration_connected_secs: 0,
+                            reason: "disconnect".to_string(),
+                        },
+                    );
                     // 1. Session cleanup
                     let _ = Self::with_sessions_mut(|s| {
                         s.on_disconnect(slot);
@@ -993,12 +1008,36 @@ impl HostRuntime {
                 }
                 _ => {}
             },
+            HostEvent::EntityTakeDamage {
+                victim,
+                attacker,
+                damage,
+                ..
+            } => {
+                crate::reports::record_event(goldsrc_service_reports::ReportEvent::Damage {
+                    attacker,
+                    victim,
+                    damage,
+                    weapon: String::new(),
+                    hitgroup: 0,
+                    timestamp_ms: Self::current_time() as u64,
+                });
+            }
+            HostEvent::EntityKilled {
+                victim, attacker, ..
+            } => {
+                crate::reports::record_event(goldsrc_service_reports::ReportEvent::Kill {
+                    attacker,
+                    victim,
+                    weapon: String::new(),
+                    headshot: false,
+                    timestamp_ms: Self::current_time() as u64,
+                });
+            }
             HostEvent::CmdStart { .. }
             | HostEvent::EntityTouch { .. }
             | HostEvent::EntityUse { .. }
             | HostEvent::MenuSelect { .. }
-            | HostEvent::EntityTakeDamage { .. }
-            | HostEvent::EntityKilled { .. }
             | HostEvent::Custom { .. } => {}
         }
     }

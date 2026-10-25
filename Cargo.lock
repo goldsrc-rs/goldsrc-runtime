@@ -521,7 +521,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc-api"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#29bc49e00a04d76654a06e3613a6a92f929cbd43"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#aace76a145a0d8b0c0d3807b051202d635843232"
 dependencies = [
  "goldsrc-spi",
  "goldsrc-sys",
@@ -571,6 +571,7 @@ dependencies = [
  "goldsrc-service-menu",
  "goldsrc-service-moderation",
  "goldsrc-service-placeholders",
+ "goldsrc-service-reports",
  "goldsrc-service-storage",
  "goldsrc-service-telemetry",
  "goldsrc-service-timer",
@@ -751,7 +752,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-spi"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#29bc49e00a04d76654a06e3613a6a92f929cbd43"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#aace76a145a0d8b0c0d3807b051202d635843232"
 dependencies = [
  "serde",
  "stitch-core",
@@ -761,7 +762,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#29bc49e00a04d76654a06e3613a6a92f929cbd43"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#aace76a145a0d8b0c0d3807b051202d635843232"
 dependencies = [
  "bindgen",
 ]
