@@ -148,10 +148,14 @@ pub fn instantiate_plugin<P: AsRef<Path>>(
             let mut resolve = wit_parser::Resolve::default();
             let pkg = resolve
                 .push_str("goldsrc.wit", include_str!("../../wit/goldsrc.wit"))
-                .unwrap();
+                .map_err(|e| {
+                    LoadError::Embed(format!("Failed to parse embedded goldsrc.wit: {e}"))
+                })?;
             let world_id = resolve
                 .select_world(&[pkg], Some("goldsrc-plugin"))
-                .unwrap();
+                .map_err(|e| {
+                    LoadError::Embed(format!("Failed to select goldsrc-plugin world: {e}"))
+                })?;
 
             let mut wasm_bytes = bytes.to_vec();
             wit_component::embed_component_metadata(

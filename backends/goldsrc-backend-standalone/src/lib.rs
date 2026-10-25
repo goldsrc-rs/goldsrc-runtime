@@ -90,6 +90,7 @@ fn init_wasm_host() {
 
     let engine: std::sync::Arc<dyn goldsrc_spi::engine::EnginePort> =
         std::sync::Arc::new(*backend());
+    #[cfg(feature = "legacy-reapi")]
     goldsrc_extension_reapi::init();
     if let Err(e) = goldsrc_core::host::HostRuntime::init(
         goldsrc_api::consts::BackendType::Standalone,

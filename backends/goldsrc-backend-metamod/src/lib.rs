@@ -72,6 +72,7 @@ pub fn init_wasm_host() {
     let engine: std::sync::Arc<dyn goldsrc_spi::engine::EnginePort> = std::sync::Arc::new(
         goldsrc_core::backend::EngineBackend::new(engfuncs, &PRINT_QUEUE),
     );
+    #[cfg(feature = "legacy-reapi")]
     goldsrc_extension_reapi::init();
     goldsrc_extension_metamod::init(true);
     if let Err(e) = goldsrc_core::host::HostRuntime::init(

@@ -1006,7 +1006,30 @@ impl HostRuntime {
                         }
                     }
                 }
-                _ => {}
+                PlayerEvent::PutInServer => {
+                    log::trace!(target: log_targets::CORE, "Player {slot} put in server");
+                }
+                PlayerEvent::PreThink => {
+                    log::trace!(target: log_targets::CORE, "Player {slot} pre-think");
+                }
+                PlayerEvent::PostThink => {
+                    log::trace!(target: log_targets::CORE, "Player {slot} post-think");
+                }
+                PlayerEvent::CmdEnd => {
+                    log::trace!(target: log_targets::CORE, "Player {slot} cmd end");
+                }
+                PlayerEvent::Kill => {
+                    log::trace!(target: log_targets::CORE, "Player {slot} suicide / client kill");
+                }
+                PlayerEvent::SpectatorConnect => {
+                    log::trace!(target: log_targets::CORE, "Spectator {slot} connect");
+                }
+                PlayerEvent::SpectatorDisconnect => {
+                    log::trace!(target: log_targets::CORE, "Spectator {slot} disconnect");
+                }
+                PlayerEvent::SpectatorThink => {
+                    log::trace!(target: log_targets::CORE, "Spectator {slot} think");
+                }
             },
             HostEvent::EntityTakeDamage {
                 victim,
@@ -1034,11 +1057,35 @@ impl HostRuntime {
                     timestamp_ms: Self::current_time() as u64,
                 });
             }
-            HostEvent::CmdStart { .. }
-            | HostEvent::EntityTouch { .. }
-            | HostEvent::EntityUse { .. }
-            | HostEvent::MenuSelect { .. }
-            | HostEvent::Custom { .. } => {}
+            HostEvent::MenuSelect { player, item_id } => {
+                if let Some(engine) = Self::engine() {
+                    let current_time = Self::current_time();
+                    if let Ok(mut mgr) = crate::menu::menu_manager().lock() {
+                        let _ = mgr.handle_menuselect(
+                            player,
+                            item_id as u8,
+                            engine.as_ref(),
+                            current_time,
+                        );
+                    }
+                }
+            }
+            HostEvent::CmdStart { slot, buttons } => {
+                log::trace!(target: log_targets::CORE, "CmdStart slot={slot} buttons={buttons:#x}");
+            }
+            HostEvent::EntityTouch { touched, other } => {
+                log::trace!(target: log_targets::CORE, "EntityTouch touched={touched} other={other}");
+            }
+            HostEvent::EntityUse { used, other } => {
+                log::trace!(target: log_targets::CORE, "EntityUse used={used} other={other}");
+            }
+            HostEvent::Custom { name, payload } => {
+                log::trace!(
+                    target: log_targets::CORE,
+                    "HostEvent::Custom name={name} len={}",
+                    payload.len()
+                );
+            }
         }
     }
 
