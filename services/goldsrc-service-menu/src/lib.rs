@@ -14,6 +14,7 @@ use goldsrc_spi::engine::EnginePort;
 use stitch_rs::flow::FlowControl;
 
 /// Execution context for a player menu slot selection in the SMA U-cycle.
+#[repr(C, align(64))]
 #[derive(Debug, Clone)]
 pub struct MenuSelectContext {
     /// Slot index of the player performing selection.
@@ -45,6 +46,8 @@ impl MenuSelectContext {
         self.is_suppressed = true;
     }
 }
+
+impl stitch_rs::Blackboard for MenuSelectContext {}
 
 /// Type definition for a menu filter middleware layer with SMA U-cycle semantics.
 pub trait MenuLayer: Send + Sync {
@@ -82,6 +85,19 @@ impl stitch_rs::middleware::Terminal<MenuSelectContext, (), (), ()> for MenuTerm
     fn execute(&mut self, ctx: &mut MenuSelectContext, _intent: ()) -> Result<(), ()> {
         if ctx.is_suppressed { Err(()) } else { Ok(()) }
     }
+}
+
+/// Runs a compile-time monomorphic U-cycle pipeline over [`MenuSelectContext`].
+#[inline(always)]
+#[allow(clippy::result_unit_err)]
+pub fn run_monomorphic_menu_pipeline<C>(
+    mut pipeline: stitch_rs::pipeline::Pipeline<MenuSelectContext, (), (), (), C>,
+    ctx: &mut MenuSelectContext,
+) -> Result<(), ()>
+where
+    C: stitch_rs::pipeline::PipelineChain<MenuSelectContext, (), (), ()>,
+{
+    pipeline.dispatch(ctx, ())
 }
 
 /// Traversal runner for dynamic SMA U-cycle menu middleware layers.
@@ -1356,6 +1372,19 @@ mod tests {
 
         // Slot 2 proceeds and succeeds
         assert!(mgr.handle_menuselect(player, 2, &engine, 51.0));
+    }
+
+    #[test]
+    fn test_monomorphic_menu_pipeline() {
+        let mut ctx = MenuSelectContext::new(1, 2, 10.0, None);
+        let pipeline = stitch_rs::pipeline::Pipeline::on_terminal(MenuTerminal)
+            .wrap(MenuLayerAdapter(RejectSlotOneLayer));
+        assert!(run_monomorphic_menu_pipeline(pipeline, &mut ctx).is_ok());
+
+        let mut blocked_ctx = MenuSelectContext::new(1, 1, 10.0, None);
+        let pipeline_blocked = stitch_rs::pipeline::Pipeline::on_terminal(MenuTerminal)
+            .wrap(MenuLayerAdapter(RejectSlotOneLayer));
+        assert!(run_monomorphic_menu_pipeline(pipeline_blocked, &mut blocked_ctx).is_err());
     }
 
     #[test]
