@@ -22,6 +22,7 @@ pub mod paths;
 pub mod placeholders;
 pub mod plugins;
 pub mod preset;
+pub mod reports;
 pub mod rules;
 pub mod session;
 pub mod storage;

@@ -18,6 +18,7 @@ goldsrc-service-storage = { workspace = true }
 goldsrc-service-telemetry = { workspace = true }
 goldsrc-service-timer = { workspace = true }
 goldsrc-service-i18n = { workspace = true }
+goldsrc-service-reports = { workspace = true }
 goldsrc-host-wasm = { workspace = true }
 lexopt = { workspace = true, optional = true }
 serde = { workspace = true }
