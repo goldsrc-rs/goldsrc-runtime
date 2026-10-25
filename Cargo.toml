@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "core/goldsrc-core",
+    "engine",
     "backends/goldsrc-backend-metamod",
     "backends/goldsrc-backend-standalone",
     "hosts/goldsrc-host-wasm",
@@ -18,7 +18,7 @@ members = [
     "services/goldsrc-service-reports",
 ]
 default-members = [
-    "core/goldsrc-core",
+    "engine",
     "backends/goldsrc-backend-metamod",
     "backends/goldsrc-backend-standalone",
     "hosts/goldsrc-host-wasm",
@@ -49,7 +49,7 @@ repository = "https://github.com/goldsrc-rs/goldsrc-runtime"
 goldsrc-sys = { git = "https://github.com/goldsrc-rs/goldsrc-sdk.git", branch = "dev" }
 goldsrc-api = { git = "https://github.com/goldsrc-rs/goldsrc-sdk.git", branch = "dev" }
 goldsrc-spi = { git = "https://github.com/goldsrc-rs/goldsrc-sdk.git", branch = "dev" }
-goldsrc-core = { path = "core/goldsrc-core", version = "0.20.0" }
+goldsrc-core = { path = "engine", version = "0.20.0" }
 goldsrc-extension-reapi = { path = "extensions/goldsrc-extension-reapi", version = "0.20.0" }
 goldsrc-extension-metamod = { path = "extensions/goldsrc-extension-metamod", version = "0.20.0" }
 goldsrc-backend-metamod = { path = "backends/goldsrc-backend-metamod", version = "0.20.0" }

@@ -36,3 +36,8 @@ scratch/
 .env
 .env.*
 __pycache__/
+
+# Test-generated game dirs
+/cstrike/
+/valve/
+
