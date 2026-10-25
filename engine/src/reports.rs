@@ -71,7 +71,8 @@ mod tests {
 
     #[test]
     fn test_map_session_lifecycle_and_event_recording() {
-        let temp_dir = std::env::temp_dir().join(format!("goldsrc_test_reports_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("goldsrc_test_reports_{}", std::process::id()));
         init_reports(temp_dir.clone());
 
         start_map_session("de_dust2");
@@ -105,9 +106,11 @@ mod tests {
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .collect();
 
-        assert!(!files.is_empty(), "a json report file must have been flushed");
+        assert!(
+            !files.is_empty(),
+            "a json report file must have been flushed"
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-
