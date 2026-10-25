@@ -17,6 +17,8 @@ pub struct ClientSession {
     pub slot: i32,
     /// Engine user ID (`pfnGetPlayerUserId`) assigned by server.
     pub user_id: u32,
+    /// Timestamp when this session connected.
+    pub connected_at: std::time::Instant,
 }
 
 impl ClientSession {
@@ -26,9 +28,16 @@ impl ClientSession {
             slot,
             generation,
             user_id: 0,
+            connected_at: std::time::Instant::now(),
             userinfo_overrides: HashMap::new(),
             metadata: HashMap::new(),
         }
+    }
+
+    /// Returns session connection duration in seconds.
+    #[inline(always)]
+    pub fn duration_secs(&self) -> u64 {
+        self.connected_at.elapsed().as_secs()
     }
 
     /// Returns the generational session token for this client.

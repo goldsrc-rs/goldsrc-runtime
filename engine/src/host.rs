@@ -955,12 +955,15 @@ impl HostRuntime {
                         player_count,
                     );
 
+                    let mut player_auth = String::new();
+                    let mut player_ip = String::new();
+
                     // Native ban enforcement check
                     if let Some(engine) = Self::engine() {
-                        let auth = engine.player_auth_id(slot).unwrap_or_default();
-                        let ip = engine.player_ip(slot).unwrap_or_default();
-                        let ban = crate::moderation::is_identity_banned(&auth)
-                            .or_else(|| crate::moderation::is_identity_banned(&ip));
+                        player_auth = engine.player_auth_id(slot).unwrap_or_default();
+                        player_ip = engine.player_ip(slot).unwrap_or_default();
+                        let ban = crate::moderation::is_identity_banned(&player_auth)
+                            .or_else(|| crate::moderation::is_identity_banned(&player_ip));
                         if let Some(b) = ban {
                             crate::moderation::drop_client(
                                 slot,
@@ -968,13 +971,29 @@ impl HostRuntime {
                             );
                         }
                     }
+
+                    crate::reports::record_event(goldsrc_service_reports::ReportEvent::Connect {
+                        player: slot,
+                        auth: player_auth,
+                        ip: player_ip,
+                        timestamp_ms: (Self::current_time() * 1000.0) as u64,
+                    });
                 }
                 PlayerEvent::Disconnect => {
+                    let mut player_auth = String::new();
+                    if let Some(engine) = Self::engine() {
+                        player_auth = engine.player_auth_id(slot).unwrap_or_default();
+                    }
+                    let duration =
+                        Self::with_sessions(|s| s.get(slot).map(|sess| sess.duration_secs()))
+                            .flatten()
+                            .unwrap_or(0);
+
                     crate::reports::record_event(
                         goldsrc_service_reports::ReportEvent::Disconnect {
                             player: slot,
-                            auth: String::new(),
-                            duration_connected_secs: 0,
+                            auth: player_auth,
+                            duration_connected_secs: duration,
                             reason: "disconnect".to_string(),
                         },
                     );
@@ -1203,9 +1222,25 @@ impl HostRuntime {
     }
 
     fn handle_server_frame() {
+        // Throttle filesystem watcher inspection to ~10 Hz (every 100ms)
+        // to avoid locking RUNTIME mutex and polling channels at 1000 Hz.
+        static LAST_WATCHER_CHECK: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+
+        let now_ms = (Self::current_time() * 1000.0) as u64;
+        let last_ms = LAST_WATCHER_CHECK.load(std::sync::atomic::Ordering::Relaxed);
+        if now_ms.saturating_sub(last_ms) < 100 {
+            return;
+        }
+        LAST_WATCHER_CHECK.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+
         let events = if let Some(lock) = RUNTIME.get() {
             let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-            guard.watcher_service.drain_events()
+            if guard.watcher_service.has_pending_events() {
+                guard.watcher_service.drain_events()
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         };
