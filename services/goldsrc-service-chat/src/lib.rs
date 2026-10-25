@@ -44,6 +44,44 @@ impl stitch_rs::middleware::Terminal<ChatMessage, (), (), ()> for ChatTerminal {
     }
 }
 
+/// A monomorphic tuple-based U-cycle pipeline node for zero-cost static chat processing.
+pub trait MonomorphicChatNode {
+    /// Executes the full compile-time U-cycle on the given message.
+    #[allow(clippy::result_unit_err)]
+    fn cycle(&self, msg: &mut ChatMessage) -> Result<(), ()>;
+}
+
+impl MonomorphicChatNode for ChatTerminal {
+    #[inline(always)]
+    fn cycle(&self, msg: &mut ChatMessage) -> Result<(), ()> {
+        if msg.is_blocked { Err(()) } else { Ok(()) }
+    }
+}
+
+impl<L: ChatLayer, Next: MonomorphicChatNode> MonomorphicChatNode for (L, Next) {
+    #[inline(always)]
+    fn cycle(&self, msg: &mut ChatMessage) -> Result<(), ()> {
+        match self.0.on_enter(msg) {
+            FlowControl::Proceed(()) => {
+                let mut outcome = self.1.cycle(msg);
+                self.0.on_exit(msg, &mut outcome);
+                outcome
+            }
+            FlowControl::ShortCircuit(()) => {
+                let mut outcome = Ok(());
+                self.0.on_exit(msg, &mut outcome);
+                outcome
+            }
+            FlowControl::Halt(()) => {
+                msg.is_blocked = true;
+                let mut outcome = Err(());
+                self.0.on_exit(msg, &mut outcome);
+                outcome
+            }
+        }
+    }
+}
+
 /// Global dynamic chat processing pipeline registry.
 static CHAT_PIPELINE: LazyLock<RwLock<Vec<Arc<dyn ChatLayer>>>> =
     LazyLock::new(|| RwLock::new(Vec::new()));
@@ -548,6 +586,31 @@ mod tests {
         }
 
         fn on_exit(&self, _msg: &mut ChatMessage, _outcome: &mut Result<(), ()>) {}
+    }
+
+    #[test]
+    fn test_monomorphic_chat_pipeline() {
+        struct CensorshipLayer;
+        impl ChatLayer for CensorshipLayer {
+            fn on_enter(&self, msg: &mut ChatMessage) -> FlowControl<(), (), ()> {
+                if msg.raw_text.contains("badword") {
+                    FlowControl::Halt(())
+                } else {
+                    FlowControl::Proceed(())
+                }
+            }
+            fn on_exit(&self, _msg: &mut ChatMessage, _outcome: &mut Result<(), ()>) {}
+        }
+
+        let pipeline = (CensorshipLayer, ChatTerminal);
+        let sender = Player::new(1);
+
+        let mut msg_clean = ChatMessage::new(sender, "Hello world", ChatScope::all());
+        assert!(pipeline.cycle(&mut msg_clean).is_ok());
+
+        let mut msg_bad = ChatMessage::new(sender, "badword here", ChatScope::all());
+        assert!(pipeline.cycle(&mut msg_bad).is_err());
+        assert!(msg_bad.is_blocked);
     }
 
     #[test]
