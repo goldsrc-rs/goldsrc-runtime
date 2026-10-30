@@ -136,6 +136,8 @@ struct VTablePipelineRegistry {
 
 static VTABLE_REGISTRY: LazyLock<RwLock<VTablePipelineRegistry>> =
     LazyLock::new(|| RwLock::new(VTablePipelineRegistry::default()));
+static HAS_DAMAGE_HOOKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HAS_KILLED_HOOKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Central facade for entity C++ VTable interception and lifecycle dispatching.
 pub struct VTableBridge;
@@ -154,6 +156,7 @@ impl VTableBridge {
     pub fn register_take_damage_layer(layer: Arc<dyn TakeDamageLayer>) {
         if let Ok(mut reg) = VTABLE_REGISTRY.write() {
             reg.damage_layers.push(layer);
+            HAS_DAMAGE_HOOKS.store(true, std::sync::atomic::Ordering::Release);
         }
     }
 
@@ -161,6 +164,7 @@ impl VTableBridge {
     pub fn register_killed_layer(layer: Arc<dyn KilledLayer>) {
         if let Ok(mut reg) = VTABLE_REGISTRY.write() {
             reg.killed_layers.push(layer);
+            HAS_KILLED_HOOKS.store(true, std::sync::atomic::Ordering::Release);
         }
     }
 
@@ -185,7 +189,9 @@ impl VTableBridge {
         let mut halted_res = None;
         let mut entered_count = 0;
 
-        let outcome = {
+        let outcome = if !HAS_DAMAGE_HOOKS.load(std::sync::atomic::Ordering::Acquire) {
+            Ok(())
+        } else {
             let reg = match VTABLE_REGISTRY.read() {
                 Ok(r) => r,
                 Err(e) => e.into_inner(),
@@ -249,7 +255,9 @@ impl VTableBridge {
         let mut halted_res = None;
         let mut entered_count = 0;
 
-        let outcome = {
+        let outcome = if !HAS_KILLED_HOOKS.load(std::sync::atomic::Ordering::Acquire) {
+            Ok(())
+        } else {
             let reg = match VTABLE_REGISTRY.read() {
                 Ok(r) => r,
                 Err(e) => e.into_inner(),

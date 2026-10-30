@@ -67,13 +67,10 @@ pub fn dispatch_placeholder_pipeline(
     ctx: &mut PlaceholderContext<'_>,
     intent: &PlaceholderIntent<'_>,
 ) -> Result<(), ()> {
-    let pipeline = {
-        let lock = PLACEHOLDER_PIPELINE
-            .read()
-            .unwrap_or_else(|e| e.into_inner());
-        lock.clone()
-    };
-    pipeline.dispatch(ctx, intent)
+    let lock = PLACEHOLDER_PIPELINE
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
+    lock.dispatch(ctx, intent)
 }
 
 /// Global thread-safe registry of registered placeholder providers.

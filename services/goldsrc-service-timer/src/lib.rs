@@ -74,11 +74,8 @@ pub fn dispatch_timer_trigger(
     ctx: &mut TimerTriggerContext,
     intent: &TimerTriggerIntent,
 ) -> Result<(), ()> {
-    let pipeline = TIMER_PIPELINE
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    pipeline.dispatch(ctx, intent)
+    let lock = TIMER_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
+    lock.dispatch(ctx, intent)
 }
 
 type TaskCallback = Box<dyn FnMut() -> TimerAction + Send + 'static>;

@@ -83,11 +83,8 @@ pub fn dispatch_report_pipeline(
     ctx: &mut ReportSubmissionContext<'_>,
     intent: &ReportIntent<'_>,
 ) -> Result<(), ()> {
-    let pipeline = {
-        let lock = REPORT_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
-        lock.clone()
-    };
-    pipeline.dispatch(ctx, intent)
+    let lock = REPORT_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
+    lock.dispatch(ctx, intent)
 }
 
 static GLOBAL_REPORTS: LazyLock<Arc<ReportAggregator>> =
