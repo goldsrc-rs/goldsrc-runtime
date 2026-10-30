@@ -64,6 +64,9 @@ impl TelemetryPipeline {
 
     #[allow(clippy::result_unit_err)]
     pub fn dispatch(&self, ctx: &mut TelemetryContext<'_>) -> Result<(), ()> {
+        if self.layers.is_empty() {
+            return Ok(());
+        }
         let mut entered_count = 0;
         let mut halted = false;
 
@@ -317,11 +320,8 @@ impl SystemInfoService {
         };
 
         let mut ctx = TelemetryContext::new(&mut snapshot);
-        let pipeline = {
-            let lock = TELEMETRY_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
-            lock.clone()
-        };
-        let _ = pipeline.dispatch(&mut ctx);
+        let lock = TELEMETRY_PIPELINE.read().unwrap_or_else(|e| e.into_inner());
+        let _ = lock.dispatch(&mut ctx);
 
         snapshot
     }

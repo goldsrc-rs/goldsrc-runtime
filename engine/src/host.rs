@@ -19,7 +19,6 @@ pub struct HostRuntime {
 }
 
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
 
 static RUNTIME: OnceLock<Mutex<HostRuntime>> = OnceLock::new();
 static ENGINE_INSTANCE: OnceLock<std::sync::Arc<dyn goldsrc_spi::engine::EnginePort>> =
@@ -1379,12 +1378,12 @@ impl HostRuntime {
         crate::hardware::system_info().on_frame();
 
         // Throttle disk flushing to at most once every second to prevent per-frame I/O stalls
-        static LAST_LOG_FLUSH: OnceLock<Mutex<Instant>> = OnceLock::new();
-        let tracker = LAST_LOG_FLUSH.get_or_init(|| Mutex::new(Instant::now()));
-        if let Ok(mut last) = tracker.try_lock()
-            && last.elapsed() >= std::time::Duration::from_millis(1000)
-        {
-            *last = Instant::now();
+        static LAST_LOG_FLUSH_MS: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let now_ms = (Self::current_time() * 1000.0) as u64;
+        let last_ms = LAST_LOG_FLUSH_MS.load(std::sync::atomic::Ordering::Relaxed);
+        if now_ms.saturating_sub(last_ms) >= 1000 {
+            LAST_LOG_FLUSH_MS.store(now_ms, std::sync::atomic::Ordering::Relaxed);
             crate::logging::flush();
         }
     }
