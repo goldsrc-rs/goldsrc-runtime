@@ -66,7 +66,7 @@ goldsrc-service-timer = { path = "services/goldsrc-service-timer", version = "0.
 goldsrc-service-i18n = { path = "services/goldsrc-service-i18n", version = "0.20.0" }
 goldsrc-service-reports = { path = "services/goldsrc-service-reports", version = "0.20.0" }
 
-wasmtime = { version = "49.0", default-features = false, features = [
+wasmtime = { version = "50.0", default-features = false, features = [
     "cranelift",
     "pulley",
     "component-model",
