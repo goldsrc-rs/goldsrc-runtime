@@ -434,19 +434,22 @@ impl HostRuntime {
             Some(print_cb),
         );
 
-        // Initialize structured reports service
+        // Initialize structured reports service and startup session
         crate::reports::init_reports(logs_dir);
-
-        // Initial startup banner stating active backend and version
-        log::info!(
-            target: log_targets::CORE,
-            "GoldSrc.rs v{} initialized (Backend: {})",
-            env!("CARGO_PKG_VERSION"),
-            backend_name
+        crate::reports::start_startup_session(backend_name);
+        crate::reports::record_subsystem_init(
+            "Core",
+            "Ok",
+            format!("{backend_name} Backend (Engine v{})", env!("CARGO_PKG_VERSION")),
         );
 
         let main_cfg_path = PathResolver::main_config_path(backend);
-        log::info!(
+        crate::reports::record_subsystem_init(
+            "Config",
+            "Ok",
+            PathResolver::normalize(&main_cfg_path),
+        );
+        log::debug!(
             target: log_targets::CORE,
             "Config loaded from: \"{}\"",
             PathResolver::normalize(&main_cfg_path)
@@ -456,7 +459,12 @@ impl HostRuntime {
         let db_path = crate::paths::PathResolver::db_path(backend);
         let storage = match crate::storage::SqliteStorageEngine::open(&db_path) {
             Ok(s) => {
-                log::info!(
+                crate::reports::record_subsystem_init(
+                    "Storage",
+                    "Ok",
+                    format!("SQLite WAL Engine ({})", PathResolver::normalize(&db_path)),
+                );
+                log::debug!(
                     target: log_targets::STORAGE,
                     "SQLite WAL Storage Engine initialized at \"{}\"",
                     PathResolver::normalize(&db_path)
@@ -464,6 +472,11 @@ impl HostRuntime {
                 s
             }
             Err(e) => {
+                crate::reports::record_subsystem_init(
+                    "Storage",
+                    "Failed",
+                    format!("{e}"),
+                );
                 log::error!(
                     target: log_targets::STORAGE,
                     "Failed to initialize SQLite Storage Engine at \"{}\": {e}",
@@ -489,7 +502,12 @@ impl HostRuntime {
             let _ = std::fs::write(&sample_lang_file, default_template);
         }
         let lang_count = crate::i18n::I18nService::load_dir(&lang_dir);
-        log::info!(
+        crate::reports::record_subsystem_init(
+            "i18n",
+            "Ok",
+            format!("{lang_count} entries ({})", PathResolver::normalize(&lang_dir)),
+        );
+        log::debug!(
             target: log_targets::I18N,
             "Loaded {lang_count} localization entries from \"{}\"",
             PathResolver::normalize(&lang_dir)
@@ -528,7 +546,16 @@ impl HostRuntime {
         }
 
         if !registered_watchers.is_empty() {
-            log::info!(
+            crate::reports::record_subsystem_init(
+                "Watchers",
+                "Ok",
+                format!(
+                    "{}/3 active ({})",
+                    registered_watchers.len(),
+                    registered_watchers.join(", ")
+                ),
+            );
+            log::debug!(
                 target: log_targets::CORE,
                 "Hot-reload watchers active ({}/3): [{}]",
                 registered_watchers.len(),
@@ -540,7 +567,12 @@ impl HostRuntime {
         let plugins_config_path = config_dir.join("plugins.toml");
         let plugins_config =
             crate::plugins_config::PluginsConfig::load_or_create(&plugins_config_path);
-        log::info!(
+        crate::reports::record_subsystem_init(
+            "PluginsCfg",
+            "Ok",
+            crate::paths::PathResolver::normalize(&plugins_config_path),
+        );
+        log::debug!(
             target: log_targets::WASM,
             "Plugins orchestration config loaded from: \"{}\"",
             crate::paths::PathResolver::normalize(&plugins_config_path)
@@ -646,33 +678,42 @@ impl HostRuntime {
             }
         }
 
+        for info in manager.get_plugins_info() {
+            let version = info
+                .metadata
+                .as_ref()
+                .map(|m| m.version.as_str())
+                .unwrap_or(env!("CARGO_PKG_VERSION"));
+            let commands = info
+                .metadata
+                .as_ref()
+                .map(|m| m.commands.clone())
+                .unwrap_or_default();
+            let status_str = info.status.label();
+            crate::reports::record_plugin_loaded(&info.name, version, status_str, &commands);
+        }
+
+        for (name, err) in &failed_plugins {
+            crate::reports::record_plugin_loaded(name, "unknown", "Failed", &[]);
+            log::error!(
+                target: log_targets::WASM,
+                "  Failed to load '{name}': {err}"
+            );
+        }
+
         let total = active_plugins.len() + paused_plugins_list.len() + failed_plugins.len();
-        log::info!(
+        log::debug!(
             target: log_targets::WASM,
             "Plugins startup summary: {total} total ({active} active, {paused} paused, {failed} failed)",
             active = active_plugins.len(),
             paused = paused_plugins_list.len(),
             failed = failed_plugins.len(),
         );
-        if !active_plugins.is_empty() {
-            log::info!(
-                target: log_targets::WASM,
-                "  Active plugins: [{}]",
-                active_plugins.join(", ")
-            );
-        }
-        if !paused_plugins_list.is_empty() {
-            log::info!(
-                target: log_targets::WASM,
-                "  Paused plugins: [{}]",
-                paused_plugins_list.join(", ")
-            );
-        }
-        for (name, err) in failed_plugins {
-            log::error!(
-                target: log_targets::WASM,
-                "  Failed to load '{name}': {err}"
-            );
+
+        if let Some(banner) = crate::reports::finalize_startup_session() {
+            for line in banner.lines() {
+                log::info!(target: log_targets::CORE, "{}", line);
+            }
         }
 
         let paused_plugins = std::collections::HashMap::new();

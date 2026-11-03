@@ -6,6 +6,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 static AGGREGATOR: OnceLock<Arc<ReportAggregator>> = OnceLock::new();
 static CURRENT_REPORT_ID: RwLock<Option<String>> = RwLock::new(None);
+static STARTUP_REPORT_ID: RwLock<Option<String>> = RwLock::new(None);
 
 /// Global accessor for the report aggregator.
 pub fn report_aggregator() -> Arc<ReportAggregator> {
@@ -20,6 +21,85 @@ pub fn init_reports(logs_dir: PathBuf) {
     let reports_dir = logs_dir.join("reports");
     let _ = std::fs::create_dir_all(&reports_dir);
     agg.register_exporter(Arc::new(JsonFileExporter::new(reports_dir)));
+}
+
+/// Starts an aggregated startup health report session.
+pub fn start_startup_session(backend_name: &str) {
+    let agg = report_aggregator();
+    let report_id = format!(
+        "startup_{}_{}",
+        backend_name.to_lowercase(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    );
+
+    agg.start_report(&report_id, ReportKind::ServerHealth, "(startup)");
+
+    if let Ok(mut cur) = STARTUP_REPORT_ID.write() {
+        *cur = Some(report_id);
+    }
+}
+
+/// Records a subsystem initialization event into the startup report.
+pub fn record_subsystem_init(
+    subsystem: impl Into<String>,
+    status: impl Into<String>,
+    details: impl Into<String>,
+) {
+    let agg = report_aggregator();
+    if let Ok(cur) = STARTUP_REPORT_ID.read()
+        && let Some(ref id) = *cur
+    {
+        agg.record_event(
+            id,
+            ReportEvent::SubsystemInit {
+                subsystem: subsystem.into(),
+                status: status.into(),
+                details: details.into(),
+            },
+        );
+    }
+}
+
+/// Records a loaded plugin into the startup report.
+pub fn record_plugin_loaded(
+    name: impl Into<String>,
+    version: impl Into<String>,
+    status: impl Into<String>,
+    commands: &[String],
+) {
+    let agg = report_aggregator();
+    if let Ok(cur) = STARTUP_REPORT_ID.read()
+        && let Some(ref id) = *cur
+    {
+        agg.record_event(
+            id,
+            ReportEvent::PluginLoaded {
+                name: name.into(),
+                version: version.into(),
+                status: status.into(),
+                commands: commands.to_vec(),
+            },
+        );
+    }
+}
+
+/// Finalizes the startup session, flushes the report to disk, and returns the formatted ASCII banner.
+pub fn finalize_startup_session() -> Option<String> {
+    let agg = report_aggregator();
+    let startup_id = {
+        let mut cur = STARTUP_REPORT_ID.write().unwrap_or_else(|e| e.into_inner());
+        cur.take()
+    };
+
+    if let Some(id) = startup_id
+        && let Ok(payload) = agg.finish_and_flush(&id)
+    {
+        return Some(payload.format_ascii_banner());
+    }
+    None
 }
 
 /// Starts an aggregated report session for a map.

@@ -215,7 +215,11 @@ impl PluginManager {
         plugin
             .call_on_load()
             .map_err(|e| LoadError::LoadPanic(e.to_string()))?;
-        crate::host_log(&format!("Loaded component plugin: {}", plugin.name));
+        log::debug!(
+            target: goldsrc_api::consts::log_targets::PLUGIN,
+            "Loaded component plugin: {}",
+            plugin.name
+        );
         let idx = self.plugins.len();
         if let Some(meta) = &plugin.metadata {
             self.command_registry.register_commands(idx, &meta.commands);

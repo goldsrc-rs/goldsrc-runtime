@@ -74,6 +74,19 @@ pub enum ReportEvent {
         duration_connected_secs: u64,
         reason: String,
     },
+    /// Subsystem or service initialization snapshot during startup.
+    SubsystemInit {
+        subsystem: String,
+        status: String,
+        details: String,
+    },
+    /// Plugin load snapshot during startup.
+    PluginLoaded {
+        name: String,
+        version: String,
+        status: String,
+        commands: Vec<String>,
+    },
     /// Arbitrary structured plugin event.
     Custom {
         tag: String,
@@ -154,4 +167,82 @@ pub struct ReportPayload {
     pub summary: ReportSummary,
     /// Raw chronological event trace.
     pub events: Vec<ReportEvent>,
+}
+
+impl ReportPayload {
+    /// Formats a high-contrast ASCII summary banner for console output.
+    pub fn format_ascii_banner(&self) -> String {
+        let mut out = String::with_capacity(1024);
+        out.push_str("================================================================================\n");
+        out.push_str(&format!(
+            "  GoldSrc.rs Startup Report | Session: {}\n",
+            self.id
+        ));
+        out.push_str("================================================================================\n");
+
+        let mut subsystems = Vec::new();
+        let mut plugins = Vec::new();
+
+        for ev in &self.events {
+            match ev {
+                ReportEvent::SubsystemInit {
+                    subsystem,
+                    status,
+                    details,
+                } => {
+                    subsystems.push((subsystem.as_str(), status.as_str(), details.as_str()));
+                }
+                ReportEvent::PluginLoaded {
+                    name,
+                    version,
+                    status,
+                    commands,
+                } => {
+                    plugins.push((name.as_str(), version.as_str(), status.as_str(), commands));
+                }
+                _ => {}
+            }
+        }
+
+        if !subsystems.is_empty() {
+            out.push_str("  [Subsystems]\n");
+            for (sub, status, details) in subsystems {
+                out.push_str(&format!("  * {:<10} : [{status}] {details}\n", sub));
+            }
+            out.push_str("--------------------------------------------------------------------------------\n");
+        }
+
+        if !plugins.is_empty() {
+            let active_count = plugins.iter().filter(|p| p.2 == "Active").count();
+            let paused_count = plugins.iter().filter(|p| p.2 == "Paused").count();
+            let failed_count = plugins.iter().filter(|p| p.2 == "Failed").count();
+
+            out.push_str(&format!(
+                "  [Plugins] ({} active, {} paused, {} failed)\n",
+                active_count, paused_count, failed_count
+            ));
+            out.push_str("   # | Plugin Name         | Version | Status | Commands\n");
+            out.push_str("  ---+---------------------+---------+--------+---------------------------------\n");
+            for (idx, (name, ver, status, cmds)) in plugins.iter().enumerate() {
+                let cmd_str = if cmds.is_empty() {
+                    "-".to_string()
+                } else if cmds.len() <= 3 {
+                    cmds.join(", ")
+                } else {
+                    format!("{}, +{} more", cmds[..2].join(", "), cmds.len() - 2)
+                };
+                out.push_str(&format!(
+                    "  {:>2} | {:<19} | {:<7} | {:<6} | {}\n",
+                    idx + 1,
+                    name,
+                    ver,
+                    status,
+                    cmd_str
+                ));
+            }
+        }
+
+        out.push_str("================================================================================");
+        out
+    }
 }

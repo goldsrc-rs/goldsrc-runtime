@@ -522,7 +522,6 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc-api"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "goldsrc-spi",
  "goldsrc-sys",
@@ -753,7 +752,6 @@ dependencies = [
 [[package]]
 name = "goldsrc-spi"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "serde",
  "stitch-core",
@@ -763,7 +761,6 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "bindgen",
 ]
@@ -2389,3 +2386,11 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "goldsrc"
+version = "0.20.0"
+
+[[patch.unused]]
+name = "goldsrc-macros"
+version = "0.20.0"
