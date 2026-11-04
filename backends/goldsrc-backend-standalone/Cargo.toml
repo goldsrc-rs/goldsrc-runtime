@@ -18,6 +18,7 @@ goldsrc-core = { workspace = true }
 goldsrc-extension-reapi = { workspace = true, optional = true }
 libloading = { workspace = true }
 stitch-rs = { workspace = true }
+abi-barrier = { workspace = true }
 
 [features]
 default = []
