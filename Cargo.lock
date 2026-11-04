@@ -63,7 +63,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 3.0.5",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -522,6 +522,7 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc-api"
 version = "0.20.0"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "goldsrc-spi",
  "goldsrc-sys",
@@ -752,6 +753,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-spi"
 version = "0.20.0"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "serde",
  "stitch-core",
@@ -761,6 +763,7 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "0.20.0"
+source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "bindgen",
 ]
@@ -1476,12 +1479,12 @@ dependencies = [
 [[package]]
 name = "stitch-core"
 version = "0.3.0"
-source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#89de13aedcc61e13af97ccb8cc07f543080071ad"
+source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#bb2eceeccf783f6f0d78740813306c08e4dc9e02"
 
 [[package]]
 name = "stitch-macros"
 version = "0.3.0"
-source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#89de13aedcc61e13af97ccb8cc07f543080071ad"
+source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#bb2eceeccf783f6f0d78740813306c08e4dc9e02"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1491,7 +1494,7 @@ dependencies = [
 [[package]]
 name = "stitch-rs"
 version = "0.3.0"
-source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#89de13aedcc61e13af97ccb8cc07f543080071ad"
+source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#bb2eceeccf783f6f0d78740813306c08e4dc9e02"
 dependencies = [
  "stitch-core",
  "stitch-macros",
@@ -2386,11 +2389,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[patch.unused]]
-name = "goldsrc"
-version = "0.20.0"
-
-[[patch.unused]]
-name = "goldsrc-macros"
-version = "0.20.0"
