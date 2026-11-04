@@ -30,6 +30,7 @@ libloading = { workspace = true }
 thiserror = { workspace = true }
 semver = { workspace = true }
 stitch-rs = { workspace = true }
+abi-barrier = { workspace = true }
 statefs-core = { workspace = true }
 statefs-config = { workspace = true }
 statefs-codec-toml = { workspace = true }

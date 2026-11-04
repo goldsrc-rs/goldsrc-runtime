@@ -19,10 +19,10 @@ mod engine_api;
 mod entities;
 mod proxy;
 
+use abi_barrier::prelude::*;
 use goldsrc_core::backend::EngineBackend;
 use goldsrc_core::log;
 use goldsrc_core::{HostEvent, PlayerEvent};
-use goldsrc_sys::ffi::catch_ffi_panic;
 use goldsrc_sys::{DLL_FUNCTIONS, enginefuncs_t, globalvars_t};
 
 // ============================================================================
@@ -424,37 +424,33 @@ pub static HOOKS: StandaloneHooks = StandaloneHooks;
 /// Any Rust panic is caught — an unhandled panic here would crash HLDS.
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub unsafe extern "system" fn GiveFnptrsToDll(
-    engfuncs: *mut enginefuncs_t,
-    globals: *mut globalvars_t,
-) {
+#[barrier(convention = CallingConvention::System, on_panic = PanicStrategy::ReturnDefault)]
+pub unsafe fn GiveFnptrsToDll(engfuncs: *mut enginefuncs_t, globals: *mut globalvars_t) {
     // SAFETY: engfuncs and globals are engine-provided; valid for the server lifetime.
-    catch_ffi_panic("GiveFnptrsToDll", (), || unsafe {
-        goldsrc_sys::guard::install_crash_guard();
-        goldsrc_core::backend::console_hook::init();
-        if !engfuncs.is_null()
-            && let Some(cmd_fn) = (*engfuncs).pfnServerCommand
-        {
-            goldsrc_core::backend::console_hook::register_shutdown_handler(cmd_fn);
-        }
-        engine_api::init(engfuncs, globals);
-        // Register the unified hook strategy before the engine queries our tables.
-        goldsrc_core::api_registry::register(goldsrc_core::api_registry::Registry {
-            hooks: &HOOKS,
-            engfuncs: engine_api::engfuncs,
-        });
-        proxy::forward_give_fnptrs_to_dll(engfuncs, globals);
-        // Expose real GameDLL entry points for direct calls (give_item etc.).
-        if let Some(f) = proxy::real_dispatch_spawn() {
-            goldsrc_core::backend::set_game_dll_spawn(f);
-        }
-        if let Some(f) = proxy::real_touch() {
-            goldsrc_core::backend::set_game_dll_touch(f);
-        }
-        if let Some(f) = proxy::real_key_value() {
-            goldsrc_core::backend::set_game_dll_key_value(f);
-        }
+    goldsrc_sys::guard::install_crash_guard();
+    goldsrc_core::backend::console_hook::init();
+    if !engfuncs.is_null()
+        && let Some(cmd_fn) = unsafe { (*engfuncs).pfnServerCommand }
+    {
+        goldsrc_core::backend::console_hook::register_shutdown_handler(cmd_fn);
+    }
+    unsafe { engine_api::init(engfuncs, globals) };
+    // Register the unified hook strategy before the engine queries our tables.
+    goldsrc_core::api_registry::register(goldsrc_core::api_registry::Registry {
+        hooks: &HOOKS,
+        engfuncs: engine_api::engfuncs,
     });
+    unsafe { proxy::forward_give_fnptrs_to_dll(engfuncs, globals) };
+    // Expose real GameDLL entry points for direct calls (give_item etc.).
+    if let Some(f) = proxy::real_dispatch_spawn() {
+        goldsrc_core::backend::set_game_dll_spawn(f);
+    }
+    if let Some(f) = proxy::real_touch() {
+        goldsrc_core::backend::set_game_dll_touch(f);
+    }
+    if let Some(f) = proxy::real_key_value() {
+        goldsrc_core::backend::set_game_dll_key_value(f);
+    }
 }
 
 /// Called by the engine to retrieve our `DLL_FUNCTIONS` hook table.
@@ -464,38 +460,32 @@ pub unsafe extern "system" fn GiveFnptrsToDll(
 /// Any Rust panic is caught — the C caller receives 0 instead of UB.
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub unsafe extern "C" fn GetEntityAPI2(
-    dll_table: *mut DLL_FUNCTIONS,
-    interface_version: *mut i32,
-) -> i32 {
-    // SAFETY: dll_table and interface_version are engine-provided; valid at call time.
-    catch_ffi_panic("GetEntityAPI2", 0, || {
-        if dll_table.is_null() {
-            return 0;
-        }
-        // Standalone overlays its own hook table on top of the real GameDLL's,
-        // so a version mismatch is reported but does not abort registration.
-        // SAFETY: interface_version is a valid engine-provided pointer.
-        if !(unsafe {
-            goldsrc_core::api_registry::negotiate_interface_version(interface_version, false)
-        }) {
-            return 0;
-        }
-        unsafe {
-            // 1. Populate with real GameDLL (mp.dll / cs.so) callbacks.
-            proxy::populate_dll_table(dll_table);
+#[barrier(convention = CallingConvention::C, on_panic = PanicStrategy::ReturnError(0))]
+pub unsafe fn GetEntityAPI2(dll_table: *mut DLL_FUNCTIONS, interface_version: *mut i32) -> i32 {
+    if dll_table.is_null() {
+        return 0;
+    }
+    // Standalone overlays its own hook table on top of the real GameDLL's,
+    // so a version mismatch is reported but does not abort registration.
+    // SAFETY: interface_version is a valid engine-provided pointer.
+    if !(unsafe {
+        goldsrc_core::api_registry::negotiate_interface_version(interface_version, false)
+    }) {
+        return 0;
+    }
+    unsafe {
+        // 1. Populate with real GameDLL (mp.dll / cs.so) callbacks.
+        proxy::populate_dll_table(dll_table);
 
-            // 2. Overlay our hooks — single registration point.
-            goldsrc_core::api_registry::install_dll_api2(dll_table);
-            (*dll_table).pfnGameInit = Some(goldsrc_core::api_registry::api_game_init);
-            (*dll_table).pfnServerActivate = Some(goldsrc_core::api_registry::api_server_activate);
-            (*dll_table).pfnClientConnect = Some(goldsrc_core::api_registry::api_client_connect);
-            (*dll_table).pfnClientDisconnect =
-                Some(goldsrc_core::api_registry::api_client_disconnect);
-            (*dll_table).pfnSpawn = Some(goldsrc_core::api_registry::api_spawn);
-        }
-        1
-    })
+        // 2. Overlay our hooks — single registration point.
+        goldsrc_core::api_registry::install_dll_api2(dll_table);
+        (*dll_table).pfnGameInit = Some(goldsrc_core::api_registry::api_game_init);
+        (*dll_table).pfnServerActivate = Some(goldsrc_core::api_registry::api_server_activate);
+        (*dll_table).pfnClientConnect = Some(goldsrc_core::api_registry::api_client_connect);
+        (*dll_table).pfnClientDisconnect = Some(goldsrc_core::api_registry::api_client_disconnect);
+        (*dll_table).pfnSpawn = Some(goldsrc_core::api_registry::api_spawn);
+    }
+    1
 }
 
 /// Old-style entity API (required for compatibility with some engine versions).
@@ -505,18 +495,14 @@ pub unsafe extern "C" fn GetEntityAPI2(
 /// Any Rust panic is caught — the C caller receives 0 instead of UB.
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub unsafe extern "C" fn GetEntityAPI(
-    dll_table: *mut DLL_FUNCTIONS,
-    interface_version: i32,
-) -> i32 {
-    catch_ffi_panic("GetEntityAPI", 0, || {
-        if dll_table.is_null() {
-            return 0;
-        }
-        let mut ver = interface_version;
-        // SAFETY: dll_table is valid, verified above.
-        unsafe { GetEntityAPI2(dll_table, &mut ver) }
-    })
+#[barrier(convention = CallingConvention::C, on_panic = PanicStrategy::ReturnError(0))]
+pub unsafe fn GetEntityAPI(dll_table: *mut DLL_FUNCTIONS, interface_version: i32) -> i32 {
+    if dll_table.is_null() {
+        return 0;
+    }
+    let mut ver = interface_version;
+    // SAFETY: dll_table is valid, verified above.
+    unsafe { GetEntityAPI2(dll_table, &mut ver) }
 }
 
 static REAL_GAME_SHUTDOWN: std::sync::atomic::AtomicPtr<()> =
@@ -526,7 +512,8 @@ static REAL_GAME_SHUTDOWN: std::sync::atomic::AtomicPtr<()> =
 ///
 /// # Safety
 /// Invoked by the engine during GameDLL shutdown.
-pub unsafe extern "C" fn hook_game_shutdown() {
+#[barrier(convention = CallingConvention::C, on_panic = PanicStrategy::ReturnDefault)]
+pub unsafe fn hook_game_shutdown() {
     goldsrc_core::backend::console_hook::suppress_tier0_spew();
     let ptr = REAL_GAME_SHUTDOWN.load(std::sync::atomic::Ordering::SeqCst);
     if !ptr.is_null() {
@@ -542,32 +529,31 @@ pub unsafe extern "C" fn hook_game_shutdown() {
 /// Any Rust panic is caught — the C caller receives 0 instead of UB.
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub unsafe extern "C" fn GetNewDLLFunctions(
+#[barrier(convention = CallingConvention::C, on_panic = PanicStrategy::ReturnError(0))]
+pub unsafe fn GetNewDLLFunctions(
     new_dll_table: *mut std::ffi::c_void,
     interface_version: *mut i32,
 ) -> i32 {
-    catch_ffi_panic("GetNewDLLFunctions", 0, || {
-        if new_dll_table.is_null() {
-            return 0;
+    if new_dll_table.is_null() {
+        return 0;
+    }
+    unsafe {
+        if !interface_version.is_null() {
+            *interface_version = goldsrc_api::consts::NEW_DLL_INTERFACE_VERSION;
         }
+    }
+    if proxy::populate_new_dll_table(new_dll_table) {
+        let table = new_dll_table as *mut goldsrc_sys::NEW_DLL_FUNCTIONS;
         unsafe {
-            if !interface_version.is_null() {
-                *interface_version = goldsrc_api::consts::NEW_DLL_INTERFACE_VERSION;
+            if let Some(f) = (*table).pfnGameShutdown {
+                REAL_GAME_SHUTDOWN.store(f as *mut (), std::sync::atomic::Ordering::SeqCst);
             }
+            (*table).pfnGameShutdown = Some(hook_game_shutdown);
         }
-        if proxy::populate_new_dll_table(new_dll_table) {
-            let table = new_dll_table as *mut goldsrc_sys::NEW_DLL_FUNCTIONS;
-            unsafe {
-                if let Some(f) = (*table).pfnGameShutdown {
-                    REAL_GAME_SHUTDOWN.store(f as *mut (), std::sync::atomic::Ordering::SeqCst);
-                }
-                (*table).pfnGameShutdown = Some(hook_game_shutdown);
-            }
-            1
-        } else {
-            0
-        }
-    })
+        1
+    } else {
+        0
+    }
 }
 
 /// Called by engine to query the studio model animation blending interface.
@@ -576,14 +562,15 @@ pub unsafe extern "C" fn GetNewDLLFunctions(
 /// Pointers must be valid or null as accepted by HLSDK.
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub unsafe extern "C" fn Server_GetBlendingInterface(
+#[barrier(convention = CallingConvention::C, on_panic = PanicStrategy::ReturnError(0))]
+pub unsafe fn Server_GetBlendingInterface(
     version: i32,
     ppinterface: *mut *mut std::ffi::c_void,
     pstudio: *mut std::ffi::c_void,
     rotationmatrix: *mut std::ffi::c_void,
     bonetransform: *mut std::ffi::c_void,
 ) -> i32 {
-    catch_ffi_panic("Server_GetBlendingInterface", 0, || unsafe {
+    unsafe {
         proxy::forward_server_get_blending_interface(
             version,
             ppinterface,
@@ -591,7 +578,7 @@ pub unsafe extern "C" fn Server_GetBlendingInterface(
             rotationmatrix,
             bonetransform,
         )
-    })
+    }
 }
 
 /// Called by engine/modules to query abstract interfaces (e.g. VServerAdmin).
@@ -600,11 +587,10 @@ pub unsafe extern "C" fn Server_GetBlendingInterface(
 /// `name` must be a valid null-terminated C string.
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub unsafe extern "C" fn CreateInterface(
+#[barrier(convention = CallingConvention::C, on_panic = PanicStrategy::ReturnDefault)]
+pub unsafe fn CreateInterface(
     name: *const std::os::raw::c_char,
     return_code: *mut i32,
 ) -> *mut std::ffi::c_void {
-    catch_ffi_panic("CreateInterface", std::ptr::null_mut(), || unsafe {
-        proxy::forward_create_interface(name, return_code)
-    })
+    unsafe { proxy::forward_create_interface(name, return_code) }
 }

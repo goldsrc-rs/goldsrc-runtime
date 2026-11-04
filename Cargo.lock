@@ -3,6 +3,33 @@
 version = 4
 
 [[package]]
+name = "abi-barrier"
+version = "0.1.0"
+source = "git+https://github.com/ulquiorracode/abi-barrier.git?branch=dev#1f1cb5aa7b726dfd487a279fed5f0020a42b5e29"
+dependencies = [
+ "abi-barrier-core",
+ "abi-barrier-derive",
+]
+
+[[package]]
+name = "abi-barrier-core"
+version = "0.1.0"
+source = "git+https://github.com/ulquiorracode/abi-barrier.git?branch=dev#1f1cb5aa7b726dfd487a279fed5f0020a42b5e29"
+dependencies = [
+ "stitch-core 0.3.0 (git+https://github.com/stitch-rs/stitch-framework.git?branch=main)",
+]
+
+[[package]]
+name = "abi-barrier-derive"
+version = "0.1.0"
+source = "git+https://github.com/ulquiorracode/abi-barrier.git?branch=dev#1f1cb5aa7b726dfd487a279fed5f0020a42b5e29"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -536,6 +563,7 @@ dependencies = [
 name = "goldsrc-backend-metamod"
 version = "0.20.0"
 dependencies = [
+ "abi-barrier",
  "goldsrc-api",
  "goldsrc-core",
  "goldsrc-extension-metamod",
@@ -551,6 +579,7 @@ dependencies = [
 name = "goldsrc-backend-standalone"
 version = "0.20.0"
 dependencies = [
+ "abi-barrier",
  "goldsrc-api",
  "goldsrc-core",
  "goldsrc-extension-reapi",
@@ -564,6 +593,7 @@ dependencies = [
 name = "goldsrc-core"
 version = "0.20.0"
 dependencies = [
+ "abi-barrier",
  "crossbeam-channel",
  "goldsrc-api",
  "goldsrc-host-wasm",
@@ -756,7 +786,7 @@ version = "0.20.0"
 source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "serde",
- "stitch-core",
+ "stitch-core 0.3.0 (git+https://github.com/ulquiorracode/stitch-rs.git?branch=main)",
  "stitch-macros",
 ]
 
@@ -1479,6 +1509,11 @@ dependencies = [
 [[package]]
 name = "stitch-core"
 version = "0.3.0"
+source = "git+https://github.com/stitch-rs/stitch-framework.git?branch=main#bb2eceeccf783f6f0d78740813306c08e4dc9e02"
+
+[[package]]
+name = "stitch-core"
+version = "0.3.0"
 source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#89de13aedcc61e13af97ccb8cc07f543080071ad"
 
 [[package]]
@@ -1496,7 +1531,7 @@ name = "stitch-rs"
 version = "0.3.0"
 source = "git+https://github.com/ulquiorracode/stitch-rs.git?branch=main#89de13aedcc61e13af97ccb8cc07f543080071ad"
 dependencies = [
- "stitch-core",
+ "stitch-core 0.3.0 (git+https://github.com/ulquiorracode/stitch-rs.git?branch=main)",
  "stitch-macros",
 ]
 
