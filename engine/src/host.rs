@@ -440,7 +440,10 @@ impl HostRuntime {
         crate::reports::record_subsystem_init(
             "Core",
             "Ok",
-            format!("{backend_name} Backend (Engine v{})", env!("CARGO_PKG_VERSION")),
+            format!(
+                "{backend_name} Backend (Engine v{})",
+                env!("CARGO_PKG_VERSION")
+            ),
         );
 
         let main_cfg_path = PathResolver::main_config_path(backend);
@@ -472,11 +475,7 @@ impl HostRuntime {
                 s
             }
             Err(e) => {
-                crate::reports::record_subsystem_init(
-                    "Storage",
-                    "Failed",
-                    format!("{e}"),
-                );
+                crate::reports::record_subsystem_init("Storage", "Failed", format!("{e}"));
                 log::error!(
                     target: log_targets::STORAGE,
                     "Failed to initialize SQLite Storage Engine at \"{}\": {e}",
@@ -505,7 +504,10 @@ impl HostRuntime {
         crate::reports::record_subsystem_init(
             "i18n",
             "Ok",
-            format!("{lang_count} entries ({})", PathResolver::normalize(&lang_dir)),
+            format!(
+                "{lang_count} entries ({})",
+                PathResolver::normalize(&lang_dir)
+            ),
         );
         log::debug!(
             target: log_targets::I18N,

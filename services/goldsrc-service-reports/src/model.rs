@@ -173,12 +173,16 @@ impl ReportPayload {
     /// Formats a high-contrast ASCII summary banner for console output.
     pub fn format_ascii_banner(&self) -> String {
         let mut out = String::with_capacity(1024);
-        out.push_str("================================================================================\n");
+        out.push_str(
+            "================================================================================\n",
+        );
         out.push_str(&format!(
             "  GoldSrc.rs Startup Report | Session: {}\n",
             self.id
         ));
-        out.push_str("================================================================================\n");
+        out.push_str(
+            "================================================================================\n",
+        );
 
         let mut subsystems = Vec::new();
         let mut plugins = Vec::new();
@@ -242,7 +246,9 @@ impl ReportPayload {
             }
         }
 
-        out.push_str("================================================================================");
+        out.push_str(
+            "================================================================================",
+        );
         out
     }
 }
