@@ -549,7 +549,6 @@ checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 [[package]]
 name = "goldsrc-api"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "goldsrc-spi",
  "goldsrc-sys",
@@ -756,6 +755,7 @@ dependencies = [
  "serde",
  "stitch-rs",
  "sysinfo",
+ "wire-ring",
 ]
 
 [[package]]
@@ -783,7 +783,6 @@ dependencies = [
 [[package]]
 name = "goldsrc-spi"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "serde",
  "stitch-core 0.3.0 (git+https://github.com/ulquiorracode/stitch-rs.git?branch=main)",
@@ -793,7 +792,6 @@ dependencies = [
 [[package]]
 name = "goldsrc-sys"
 version = "0.20.0"
-source = "git+https://github.com/goldsrc-rs/goldsrc-sdk.git?branch=dev#c2ad05ecbc736da6d91e65d552b5649c050a42c1"
 dependencies = [
  "bindgen",
 ]
@@ -2253,6 +2251,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
+name = "wire-ring"
+version = "0.1.0"
+source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#b8f6ced0aff8356714af53574d091dfe554a3ae9"
+dependencies = [
+ "wire-ring-core",
+]
+
+[[package]]
+name = "wire-ring-core"
+version = "0.1.0"
+source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#b8f6ced0aff8356714af53574d091dfe554a3ae9"
+
+[[package]]
 name = "wit-bindgen"
 version = "0.63.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2424,3 +2435,11 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[patch.unused]]
+name = "goldsrc"
+version = "0.20.0"
+
+[[patch.unused]]
+name = "goldsrc-macros"
+version = "0.20.0"

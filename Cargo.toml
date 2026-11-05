@@ -89,6 +89,7 @@ crossbeam-channel = "0.5"
 semver = "1.0"
 stitch-rs = { git = "https://github.com/ulquiorracode/stitch-rs.git", branch = "main" }
 abi-barrier = { git = "https://github.com/ulquiorracode/abi-barrier.git", branch = "dev" }
+wire-ring = { git = "https://github.com/ulquiorracode/wire-ring-rs.git", branch = "dev" }
 statefs-core = { git = "https://github.com/ulquiorracode/statefs-rs.git", branch = "dev" }
 statefs-config = { git = "https://github.com/ulquiorracode/statefs-rs.git", branch = "dev" }
 statefs-codec-toml = { git = "https://github.com/ulquiorracode/statefs-rs.git", branch = "dev" }
@@ -100,6 +101,12 @@ debug = 1
 split-debuginfo = "unpacked"
 panic = "unwind"
 overflow-checks = true
+
+[profile.dev.package.windows]
+debug = false
+
+[profile.test.package.windows]
+debug = false
 
 # NOTE: `panic` must stay "unwind" — `catch_ffi_panic` (catch_unwind) relies on
 # unwinding to stop Rust panics at the C-ABI boundary before they kill HLDS.

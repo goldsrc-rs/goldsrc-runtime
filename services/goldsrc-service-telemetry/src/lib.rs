@@ -8,6 +8,12 @@ use std::time::Instant;
 use stitch_rs::flow::FlowControl;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Pid, ProcessRefreshKind, RefreshKind, System};
 
+pub mod ring;
+pub use ring::{
+    RingTelemetryLayer, TelemetryRingConsumer, TelemetryRingPublisher, TickMetricsPacket,
+    telemetry_ring_channel, telemetry_ring_heap_channel,
+};
+
 /// 64-byte aligned execution context for telemetry samples conforming to SMA.
 #[repr(C, align(64))]
 pub struct TelemetryContext<'a> {
