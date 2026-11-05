@@ -3,12 +3,17 @@
 //! Provides telemetry collection via `sysinfo` for CPU, process/system memory,
 //! and engine tickrate/jitter monitoring.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use stitch_rs::flow::FlowControl;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, Pid, ProcessRefreshKind, RefreshKind, System};
 
+pub mod collector;
+pub mod model;
 pub mod ring;
+pub use collector::{CollectorConfig, TelemetryCollectorService};
+pub use model::HostHardwareInfo;
 pub use ring::{
     RingTelemetryLayer, TelemetryRingConsumer, TelemetryRingPublisher, TickMetricsPacket,
     telemetry_ring_channel, telemetry_ring_heap_channel,
@@ -225,6 +230,10 @@ pub struct SystemInfoService {
     pid: Pid,
     start_time: Instant,
     frame_tracker: Mutex<FrameTimeTracker>,
+    // Lock-free tick tracking
+    last_tick_ns: AtomicU64,
+    tick_sequence: AtomicU64,
+    ring_publisher: Mutex<Option<TelemetryRingPublisher<wire_ring::storage::HeapStorage>>>,
 }
 
 impl Default for SystemInfoService {
@@ -255,14 +264,63 @@ impl SystemInfoService {
             pid,
             start_time: Instant::now(),
             frame_tracker: Mutex::new(FrameTimeTracker::new(128)),
+            last_tick_ns: AtomicU64::new(0),
+            tick_sequence: AtomicU64::new(0),
+            ring_publisher: Mutex::new(None),
         }
     }
 
-    /// Notifies the service that a new frame has completed. Call from engine frame hook (`StartFrame`).
-    pub fn on_frame(&self) {
-        if let Ok(mut tracker) = self.frame_tracker.lock() {
-            tracker.record_frame(Instant::now());
+    /// Attaches an outbound ring buffer publisher for high-frequency tick telemetry.
+    pub fn attach_ring_publisher(
+        &self,
+        publisher: TelemetryRingPublisher<wire_ring::storage::HeapStorage>,
+    ) {
+        if let Ok(mut lock) = self.ring_publisher.lock() {
+            *lock = Some(publisher);
         }
+    }
+
+    /// High-performance lock-free notification that a new frame has completed.
+    ///
+    /// Computes delta timestamps via atomic monotonicity and emits a 64-byte `TickMetricsPacket`
+    /// to the ring publisher with zero allocations.
+    pub fn on_frame_tick(&self) {
+        let now = Instant::now();
+        let now_ns = now.duration_since(self.start_time).as_nanos() as u64;
+
+        let prev_ns = self.last_tick_ns.swap(now_ns, Ordering::AcqRel);
+        let frame_delta_ns = if prev_ns > 0 && now_ns > prev_ns {
+            now_ns - prev_ns
+        } else {
+            0
+        };
+
+        let seq = self.tick_sequence.fetch_add(1, Ordering::Relaxed);
+
+        // Approximate instant FPS
+        let instant_fps = if frame_delta_ns > 0 {
+            (1_000_000_000.0 / frame_delta_ns as f64) as f32
+        } else {
+            0.0
+        };
+
+        if let Ok(mut pub_lock) = self.ring_publisher.try_lock()
+            && let Some(ref mut publisher) = *pub_lock
+        {
+            let packet =
+                TickMetricsPacket::new(now_ns, frame_delta_ns, instant_fps, 0.0, 0.0, 0, seq);
+            let _ = publisher.publish_tick(&packet);
+        }
+
+        // Keep rolling statistics tracker up-to-date
+        if let Ok(mut tracker) = self.frame_tracker.try_lock() {
+            tracker.record_frame(now);
+        }
+    }
+
+    /// Legacy notification that a new frame has completed.
+    pub fn on_frame(&self) {
+        self.on_frame_tick();
     }
 
     /// Captures a fresh snapshot of all system and process telemetry.
@@ -438,5 +496,66 @@ mod tests {
         let res = pipeline.dispatch(&mut ctx);
         assert_eq!(res, Ok(()));
         assert_eq!(snapshot.global_cpu_usage, 99.9);
+    }
+
+    #[test]
+    fn test_system_info_lockfree_on_frame_tick_publishes_to_ring() {
+        let service = SystemInfoService::new();
+        let (tx, mut rx) = telemetry_ring_heap_channel(4096).expect("ring channel creation");
+        service.attach_ring_publisher(tx);
+
+        for _ in 0..10 {
+            service.on_frame_tick();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        let mut collected_ticks = Vec::new();
+        let drained = rx.drain_ticks(|tick| {
+            collected_ticks.push(*tick);
+        });
+
+        assert_eq!(drained, 10);
+        assert_eq!(collected_ticks.len(), 10);
+        assert_eq!(collected_ticks[0].sequence, 0);
+        assert_eq!(collected_ticks[9].sequence, 9);
+    }
+
+    #[test]
+    fn test_telemetry_collector_service_end_to_end_stitch_container() {
+        let (tx, rx) = telemetry_ring_heap_channel(8192).expect("ring channel");
+        let service = SystemInfoService::new();
+        service.attach_ring_publisher(tx);
+
+        let temp_dir = std::env::temp_dir().join(format!("goldsrc_test_{}", std::process::id()));
+        let stitch_path = temp_dir.join("telemetry_test.stitch");
+
+        let mut config = CollectorConfig::default();
+        config.poll_interval = Duration::from_millis(10);
+        config.chunk_capacity = 5;
+
+        let collector = TelemetryCollectorService::spawn(rx, config, &stitch_path)
+            .expect("spawn collector service");
+
+        for _ in 0..15 {
+            service.on_frame_tick();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+        let total_saved = collector.stop_and_join();
+
+        assert_eq!(
+            total_saved, 15,
+            "Expected 15 ticks saved to .stitch container"
+        );
+        assert!(stitch_path.exists());
+
+        let bytes = std::fs::read(&stitch_path).expect("read stitch file");
+        // Check STDC magic
+        assert_eq!(&bytes[0..4], b"STDC");
+        // Check file size: 16 (header) + 15 * 64 (payload) + chunks * 24 + 16 (footer)
+        assert!(bytes.len() > 16 + 15 * 64);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
