@@ -15,6 +15,7 @@ use wire_ring::storage::{HeapStorage, MirroredStorage, StorageBackend};
 /// 64-byte L1D Cache-Aligned tick telemetry packet for zero-copy streaming.
 #[repr(C, align(64))]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TickMetricsPacket {
     /// Monotonic timestamp in nanoseconds.
     pub timestamp_ns: u64,

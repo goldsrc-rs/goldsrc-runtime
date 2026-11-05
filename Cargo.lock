@@ -764,6 +764,7 @@ dependencies = [
 name = "goldsrc-service-telemetry"
 version = "0.20.0"
 dependencies = [
+ "log",
  "serde",
  "stitch-rs",
  "sysinfo",

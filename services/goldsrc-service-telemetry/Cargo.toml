@@ -9,6 +9,7 @@ description = "Host-side hardware metrics, tickrate, and system diagnostics serv
 sysinfo = "0.39.6"
 stitch-rs = { workspace = true }
 wire-ring = { workspace = true }
+log = { workspace = true }
 serde = { workspace = true, optional = true }
 
 [features]
