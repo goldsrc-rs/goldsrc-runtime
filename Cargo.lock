@@ -633,6 +633,7 @@ dependencies = [
  "thiserror",
  "toml 1.2.0+spec-1.1.0",
  "windows-sys",
+ "wire-ring",
 ]
 
 [[package]]
@@ -2225,7 +2226,7 @@ checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 [[package]]
 name = "wire-ring"
 version = "0.1.0"
-source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#b8f6ced0aff8356714af53574d091dfe554a3ae9"
+source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#555e43a63aa7e2bf6115946f37147cc4d4067ec3"
 dependencies = [
  "wire-ring-core",
 ]
@@ -2233,7 +2234,7 @@ dependencies = [
 [[package]]
 name = "wire-ring-core"
 version = "0.1.0"
-source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#b8f6ced0aff8356714af53574d091dfe554a3ae9"
+source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#555e43a63aa7e2bf6115946f37147cc4d4067ec3"
 
 [[package]]
 name = "wit-bindgen"

@@ -529,9 +529,11 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("goldsrc_test_{}", std::process::id()));
         let stitch_path = temp_dir.join("telemetry_test.stitch");
 
-        let mut config = CollectorConfig::default();
-        config.poll_interval = Duration::from_millis(10);
-        config.chunk_capacity = 5;
+        let config = CollectorConfig {
+            poll_interval: Duration::from_millis(10),
+            chunk_capacity: 5,
+            ..Default::default()
+        };
 
         let collector = TelemetryCollectorService::spawn(rx, config, &stitch_path)
             .expect("spawn collector service");
