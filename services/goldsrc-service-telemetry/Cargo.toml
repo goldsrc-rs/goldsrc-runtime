@@ -6,7 +6,7 @@ license.workspace = true
 description = "Host-side hardware metrics, tickrate, and system diagnostics service for GoldSrc.rs"
 
 [dependencies]
-sysinfo = "0.39.6"
+sysinfo = "0.40.1"
 stitch-rs = { workspace = true }
 wire-ring = { workspace = true }
 log = { workspace = true }
