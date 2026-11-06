@@ -4,5 +4,7 @@
 //! and ensures strict adherence to GoldSrc buffer boundaries (185 bytes) and UTF-8 safety.
 
 pub mod dispatcher;
+pub mod ring;
 
 pub use dispatcher::NetworkMessageDispatcher;
+pub use ring::{OutboundNetRingQueue, QueuedNetMessageHeader};
