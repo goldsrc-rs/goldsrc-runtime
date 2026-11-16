@@ -204,8 +204,8 @@ impl FrameTimeTracker {
         }
         let count = self.total_samples;
         let mut sum = 0.0;
-        for i in 0..count {
-            sum += self.samples[i];
+        for &sample in self.samples.iter().take(count) {
+            sum += sample;
         }
         let mean_dt = sum / (count as f64);
         if mean_dt <= 0.0 {
@@ -215,8 +215,8 @@ impl FrameTimeTracker {
 
         // Compute standard deviation (jitter) in milliseconds
         let mut variance_sum = 0.0;
-        for i in 0..count {
-            let diff = (self.samples[i] - mean_dt) * 1000.0; // convert to ms
+        for &sample in self.samples.iter().take(count) {
+            let diff = (sample - mean_dt) * 1000.0; // convert to ms
             variance_sum += diff * diff;
         }
         let jitter_ms = (variance_sum / (count as f64)).sqrt();
