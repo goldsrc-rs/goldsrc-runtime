@@ -26,8 +26,25 @@ pub enum VTableTier {
     Tier2VTable,
 }
 
-/// Payload for `TakeDamage` virtual function call.
+/// Raw, POD C-ABI compliant representation of TakeDamage parameters across engine trampolines.
 #[repr(C, align(64))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RawTakeDamageContext {
+    /// Victim entity index.
+    pub victim: i32,
+    /// Inflictor entity index.
+    pub inflictor: i32,
+    /// Attacker entity index.
+    pub attacker: i32,
+    /// Amount of damage being dealt.
+    pub damage: f32,
+    /// Damage type bits.
+    pub bits_damage_type: i32,
+    /// Cache-line alignment padding (64 bytes total).
+    pub _pad: [u8; 44],
+}
+
+/// Payload for `TakeDamage` virtual function call with modifier pipeline.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TakeDamageContext {
     /// Algebraic, order-independent damage modifier pipeline.
