@@ -1476,16 +1476,16 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "statefs-adapter-bridge-env"
-version = "0.1.1"
-source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#ed69dfcd6f1a70463fcb56784ecd5be9986e78c2"
+version = "0.1.2"
+source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#b12121e5e0863e8f322d39f2e82be0f929845bf5"
 dependencies = [
  "statefs-core",
 ]
 
 [[package]]
 name = "statefs-adapter-bridge-serde"
-version = "0.1.1"
-source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#ed69dfcd6f1a70463fcb56784ecd5be9986e78c2"
+version = "0.1.2"
+source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#b12121e5e0863e8f322d39f2e82be0f929845bf5"
 dependencies = [
  "serde",
  "statefs-core",
@@ -1493,8 +1493,8 @@ dependencies = [
 
 [[package]]
 name = "statefs-codec-toml"
-version = "0.1.1"
-source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#ed69dfcd6f1a70463fcb56784ecd5be9986e78c2"
+version = "0.1.2"
+source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#b12121e5e0863e8f322d39f2e82be0f929845bf5"
 dependencies = [
  "serde",
  "statefs-core",
@@ -1503,8 +1503,8 @@ dependencies = [
 
 [[package]]
 name = "statefs-config"
-version = "0.1.1"
-source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#ed69dfcd6f1a70463fcb56784ecd5be9986e78c2"
+version = "0.1.2"
+source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#b12121e5e0863e8f322d39f2e82be0f929845bf5"
 dependencies = [
  "serde",
  "statefs-adapter-bridge-env",
@@ -1515,8 +1515,8 @@ dependencies = [
 
 [[package]]
 name = "statefs-core"
-version = "0.1.1"
-source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#ed69dfcd6f1a70463fcb56784ecd5be9986e78c2"
+version = "0.1.2"
+source = "git+https://github.com/ulquiorracode/statefs-rs.git?branch=dev#b12121e5e0863e8f322d39f2e82be0f929845bf5"
 dependencies = [
  "memchr",
  "serde",
