@@ -2225,16 +2225,16 @@ checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 
 [[package]]
 name = "wire-ring"
-version = "0.1.0"
-source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#555e43a63aa7e2bf6115946f37147cc4d4067ec3"
+version = "0.2.1"
+source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#1f615378e7e7263f46b7fe0b27c95af8b626ce5f"
 dependencies = [
  "wire-ring-core",
 ]
 
 [[package]]
 name = "wire-ring-core"
-version = "0.1.0"
-source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#555e43a63aa7e2bf6115946f37147cc4d4067ec3"
+version = "0.2.1"
+source = "git+https://github.com/ulquiorracode/wire-ring-rs.git?branch=dev#1f615378e7e7263f46b7fe0b27c95af8b626ce5f"
 
 [[package]]
 name = "wit-bindgen"
